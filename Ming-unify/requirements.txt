@@ -1,0 +1,14 @@
+timm==0.9.16
+torch==2.4.1
+torchaudio==2.4.1
+diffusers==0.33.0
+transformers==4.46.3
+Jinja2==3.1.0
+iopath
+decord
+webdataset
+omegaconf
+funasr
+imageio
+lmdb
+jsonlines

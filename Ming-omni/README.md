@@ -406,8 +406,6 @@ print(outputs)
 ```
 
 
-## License
+## License and Legal Disclaimer
 
-This code repository is licensed under the [MIT License](../LICENSE).
-
-
+This code repository is licensed under the [MIT License](../LICENSE), and the Legal Disclaimer is located in the [LEGAL.md file](../LEGAL.md) under the project's root directory.

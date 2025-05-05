@@ -1,20 +1,19 @@
 <h1 align="center">Ming-Lite-Uni: Advancements in Unified Architecture for Natural Multimodal Interaction</h1>
 
 <p align="center">
-          🤗 <a href="https://github.com/inclusionAI/Ming/Ming-Lite-Uni">Hugging Face</a>&nbsp&nbsp | &nbsp&nbsp🤖 <a href="https://github.com/inclusionAI/Ming/Ming-Lite-Uni">ModelScope</a>&nbsp&nbsp | &nbsp&nbsp 📑 <a href="https://github.com/inclusionAI/Ming/Ming-Lite-Uni">Paper</a>&nbsp&nbsp 
+          🤗 <a href="https://huggingface.co/inclusionAI/Ming-Lite-Uni">Hugging Face</a>&nbsp&nbsp | 
+          &nbsp&nbsp🤖 <a href="https://modelscope.cn/models/inclusionAI/Ming-Lite-Uni">ModelScope</a>&nbsp&nbsp <!-- |
+          &nbsp&nbsp 📑 <a href=" xxx ">Paper</a>&nbsp&nbsp -->
 </p>
 
-
-Ming-Lite-Uni is an open-source multimodal framework featuring a newly designed unified visual generator and a native multimodal autoregressive model tailored for unifying vision and language. Specifically, this project provides an open-source implementation of the integrated MetaQueries and M2-omni framework, while introducing the novel **multi-scale learnable tokens** and **multi-scale representation alignment strategy**. By leveraging a fixed MLLM and a learnable diffusion model, Ming-Lite-Uni enables native multimodal AR models to perform both text-to-image generation and instruction based image editing tasks, expanding their capabilities beyond pure visual understanding. Our experimental results reveal the strong performance of Ming-Lite-Uni and illustrate the impressive fluid nature of its interactive process. Ming-Lite-Uni is in alpha stage and will soon be further refined.
+`Ming-Lite-Uni` is an open-source multimodal framework featuring a newly designed unified visual generator and a native multimodal autoregressive model tailored for unifying vision and language. Specifically, this project provides an open-source implementation of the integrated MetaQueries and M2-omni framework, while introducing the novel **multi-scale learnable tokens** and **multi-scale representation alignment strategy**. By leveraging a fixed MLLM and a learnable diffusion model, Ming-Lite-Uni enables native multimodal AR models to perform both text-to-image generation and instruction based image editing tasks, expanding their capabilities beyond pure visual understanding. Our experimental results reveal the strong performance of Ming-Lite-Uni and illustrate the impressive fluid nature of its interactive process. Ming-Lite-Uni is in alpha stage and will soon be further refined.
 
 Thank you all for your continued interest and support! We truly appreciate your patience as we steadily advance our solutions and model performance. We're already making great progress and seeing promising results, and exciting updates will be coming soon—so stay tuned!
 
 ## &#x1F4CC; Updates
-* [2025.05.03] 🔥 Our [Technical Report](https://arxiv.org/abs/xxxx.xxxx) is in public on arxiv.
-* [2025.05.03] 🔥 We release the fisrt version of [Ming-Lite-Uni](https://github.com/inclusionAI/Ming/Ming-Lite-Uni).
 
-
-
+<!-- * [2025.05.03] 🔥 Our [Technical Report](  xxxx   ) is in public on arxiv. -->
+* [2025.05.03] 🔥 We release the fisrt version of [Ming-Lite-Uni](https://github.com/inclusionAI/Ming).
 
 ## Why It Matters
 

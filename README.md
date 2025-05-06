@@ -24,6 +24,6 @@ Please submit a GitHub issue if you want help or have issues using Ming.
 
 ## License
 
-Ming is licensed under [the MIT License](https://github.com/inclusionAI/Ming/blob/master/LICENCE).
+Ming is licensed under [the MIT License](./LICENSE).
 
 

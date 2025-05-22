@@ -41,14 +41,17 @@
     "padding_value": 0.0,
     "processor_class": "BailingMMProcessor",
     "wav_frontend_args": {
-      "cmvn_file": "am.mvn",
-      "fs": 16000,
-      "window": "hamming",
-      "n_mels": 80,
-      "frame_length": 25,
-      "frame_shift": 10,
-      "lfr_m": 7,
-      "lfr_n": 6
+        "cmvn_file": "am.mvn",
+        "fs": 16000,
+        "window": "hamming",
+        "n_mels": 80,
+        "frame_length": 25,
+        "frame_shift": 10,
+        "lfr_m": 7,
+        "lfr_n": 6
+    },
+    "whisper_frontend_args": {
+        "n_mels": 128
     }
 }
 

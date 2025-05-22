@@ -15,7 +15,7 @@ from transformers import PreTrainedModel
 from transformers.modeling_outputs import ModelOutput
 from transformers.utils import logging
 from configuration_bailingmm import BailingMMConfig
-from modeling_utils import patch_continuous_features
+from modeling_utils import patch_continuous_features, build_modality_mask
 
 # audio encoder
 from funasr.models.sanm.encoder import SANMEncoder
@@ -27,6 +27,9 @@ from qwen2_5_vit import Qwen2_5_VisionTransformer
 
 # talker
 from modeling_bailing_talker import BailingTalkerForConditionalGeneration
+
+# whisper encoder
+from modeling_whisper_encoder import WhisperAudioEncoder
 
 logger = logging.get_logger(__name__)
 
@@ -85,6 +88,7 @@ class BailingMMNativeForConditionalGeneration(PreTrainedModel):
         self.config: BailingMMConfig = config
         self.vision = None
         self.audio = None
+        self.whisper_encoder = None
         self.talker = None
 
         self.llm_dytpe = torch.bfloat16
@@ -94,6 +98,9 @@ class BailingMMNativeForConditionalGeneration(PreTrainedModel):
 
         if self.config.audio_config:
             self.audio = SANMEncoder(**self.config.audio_config.audio_encoder_config_sanm)
+
+        if self.config.whisper_config:
+            self.whisper_encoder = WhisperAudioEncoder(**self.config.whisper_config.whisper_encoder_config)
 
         self.model = BailingMoeForCausalLM(self.config.llm_config)
 
@@ -121,11 +128,29 @@ class BailingMMNativeForConditionalGeneration(PreTrainedModel):
             mlp_modules_audio.append(Transpose(-1, -2))
             self.linear_proj_audio = nn.Sequential(*mlp_modules_audio)
 
+        if self.whisper_encoder:
+            whisper_encoder_proj = torch.nn.Conv1d(
+                self.whisper_encoder.audio_emb_dim,
+                self.model.config.hidden_size,
+                kernel_size=self.config.whisper_config.ds_kernel_size,
+                stride=self.config.whisper_config.ds_stride,
+                padding=self.config.whisper_config.ds_kernel_size // 2,
+            )
+
+            mlp_modules_whisper = [whisper_encoder_proj, Transpose(-1, -2)]
+            for _ in range(1, self.config.mlp_depth):
+                mlp_modules_whisper.append(nn.GELU())
+                mlp_modules_whisper.append(nn.Linear(
+                    self.model.config.hidden_size, self.model.config.hidden_size
+                ))
+            mlp_modules_whisper.append(Transpose(-1, -2))  # Revert to a conv-style permutation.
+            self.linear_proj_whisper = nn.Sequential(*mlp_modules_whisper)
+
         if self.config.talker_config:
             self.config.talker_config._name_or_path = f'{self.config._name_or_path}/talker'
             self.talker = BailingTalkerForConditionalGeneration(self.config.talker_config)
-
         self.post_init()
+        self.loaded_image_gen_modules = False
 
     def extract_image_feature(self, pixel_values, grid_thw):
         with torch.cuda.amp.autocast(dtype=torch.bfloat16):
@@ -135,74 +160,29 @@ class BailingMMNativeForConditionalGeneration(PreTrainedModel):
         image_embeds = F.normalize(image_embeds, dim=-1)
         return image_embeds
     
-    def extract_audio_feature(self, audio_feats, audio_feats_lengths):
-        assert self.audio is not None
-        assert self.linear_proj_audio is not None
+    def extract_audio_feature(self, audio_feats, audio_feats_lengths, use_whisper_encoder=False):
+        if not use_whisper_encoder:
+            assert self.audio is not None
+            assert self.linear_proj_audio is not None
+            encoder = self.audio
+            proj_layer = self.linear_proj_audio
+        else:
+            assert self.whisper_encoder is not None
+            assert self.linear_proj_whisper is not None
+            encoder = self.whisper_encoder
+            proj_layer = self.linear_proj_whisper
         audio_embeds, _, audio_embeds_lengths = encode_audio_segments(
-            encoder=self.audio,
-            proj_layer=self.linear_proj_audio,
+            encoder=encoder,
+            proj_layer=proj_layer,
             wav_feats=audio_feats,
             wav_feats_lengths=audio_feats_lengths,
+            audio_config=self.config.audio_config,
+            whisper_config=self.config.whisper_config,
+            use_whisper_encoder=use_whisper_encoder
         )
         if self.config.audio_config.norm_query_embeds:
             audio_embeds = F.normalize(audio_embeds, dim=2)  # [-1, 256, 2048]
-        return audio_embeds, audio_embeds_lengths
-
-    @torch.no_grad()
-    def generate(
-        self,
-        input_ids: torch.LongTensor = None,
-        attention_mask: Optional[torch.Tensor] = None,
-        position_ids: Optional[torch.LongTensor] = None,
-        use_cache: Optional[bool] = None,
-        pixel_values: Optional[torch.FloatTensor] = None,
-        pixel_values_videos: Optional[torch.FloatTensor] = None,
-        audio_feats: Optional[torch.FloatTensor] = None,
-        image_grid_thw: Optional[torch.LongTensor] = None,
-        video_grid_thw: Optional[torch.LongTensor] = None,
-        audio_feats_lengths: Optional[torch.LongTensor] = None,
-        audio_placeholder_loc_lens: Optional[torch.LongTensor] = None,
-        past_key_values: Optional[List[torch.Tensor]] = None,
-        **generate_kwargs,
-    ):
-        image_embeds, video_embeds, audio_embeds, audio_embeds_lengths = None, None, None, None
-        if pixel_values is not None:
-            image_embeds = self.extract_image_feature(pixel_values, grid_thw=image_grid_thw)
-        if pixel_values_videos is not None:
-            video_embeds = self.extract_image_feature(pixel_values_videos, grid_thw=video_grid_thw)
-        if audio_feats is not None:
-            audio_embeds, audio_embeds_lengths = self.extract_audio_feature(audio_feats, audio_feats_lengths)
-
-        with torch.cuda.amp.autocast(dtype=torch.bfloat16):
-            if (image_embeds is None and video_embeds is None and audio_embeds is None) or input_ids.size(1) == 1:
-                words_embeddings = self.model.get_input_embeddings()(input_ids.clip(0, self.model.get_input_embeddings().weight.shape[0] - 1))
-                # input_shape = input_ids.size()
-                batch_size = input_ids.size(0) if input_ids is not None else inputs_embeds.size(0)
-                image_start_indices = [999999] * batch_size
-                image_end_indices = [999999] * batch_size
-                audio_start_indices = [999999] * batch_size
-                audio_end_indices = [999999] * batch_size
-
-            else:
-                words_embeddings, image_start_indices, image_end_indices, audio_start_indices, audio_end_indices = self.prompt_wrap_navit(
-                        input_ids.clip(0, self.model.get_input_embeddings().weight.shape[0] - 1), image_embeds, video_embeds, audio_embeds,
-                        audio_embeds_lengths, audio_placeholder_loc_lens, None,  # noqa
-                )
-
-            outputs = self.model.generate(
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-                position_ids=position_ids,
-                past_key_values=past_key_values,
-                inputs_embeds=words_embeddings,
-                use_cache=use_cache,
-                image_start_indices=image_start_indices,
-                image_end_indices=image_end_indices,
-                audio_start_indices=audio_start_indices,
-                audio_end_indices=audio_end_indices,
-                **generate_kwargs,
-            )
-        return outputs
+        return audio_embeds.to(audio_feats.dtype), audio_embeds_lengths
 
     def prompt_wrap_vision(self, input_ids, inputs_embeds, vision_embeds, image_token_id=None):
         if vision_embeds is None or input_ids is None:
@@ -219,31 +199,25 @@ class BailingMMNativeForConditionalGeneration(PreTrainedModel):
             raise ValueError(
                 f"Image features and image tokens do not match: tokens: {n_image_tokens}, features {n_image_features}"
             )
-        seq_len = input_ids.shape[1]
-        is_image_token = (input_ids == self.config.llm_config.image_patch_token).int()
-        first_indices = torch.argmax(is_image_token, dim=-1) - 1
-        last_indices_flipped = torch.argmax( is_image_token.flip(dims = [1]), dim=-1)
-        last_indices = (seq_len - 0) - last_indices_flipped
 
-        image_mask = (
+        image_router_mask =  (
             (input_ids == self.config.llm_config.image_patch_token)
             .unsqueeze(-1)
-            .expand_as(inputs_embeds)
             .to(inputs_embeds.device)
-        )
+        ) 
+        image_mask = image_router_mask.expand_as(inputs_embeds)
         image_embeds = vision_embeds.to(inputs_embeds.device, inputs_embeds.dtype)
         inputs_embeds = inputs_embeds.masked_scatter(image_mask, image_embeds)
-        return inputs_embeds,  first_indices.reshape(-1).tolist(), last_indices.reshape(-1).tolist()
+        image_router_mask = image_router_mask.squeeze(-1)
+        return inputs_embeds, image_router_mask
 
     def prompt_wrap_audio(self, input_ids, inputs_embeds, audio_embeds, audio_embeds_lengths, placeholder_audio_loc_lens):
-        assert placeholder_audio_loc_lens.shape[1] == 1, f"Currently MoE models do not support multiple audios in a single sample, but placeholder_audio_loc_lens = {placeholder_audio_loc_lens}"
         inputs_embeds = patch_continuous_features(
            input_embeddings=inputs_embeds, placeholder_loc_lens=placeholder_audio_loc_lens,
            encoded_feats=audio_embeds, encoded_feat_lens=audio_embeds_lengths,
         )
-        first_indices = placeholder_audio_loc_lens[:, 0, 0] - 1
-        last_indices = placeholder_audio_loc_lens[:, 0, 0] + placeholder_audio_loc_lens[:, 0, 1]
-        return inputs_embeds, first_indices.reshape(-1).tolist(), last_indices.reshape(-1).tolist()
+        audio_router_mask = build_modality_mask(placeholder_audio_loc_lens, inputs_embeds.shape[:-1]).to(inputs_embeds.device)
+        return inputs_embeds, audio_router_mask
      
     def prompt_wrap_navit(self, input_ids, query_embeds_image=None, query_embeds_video=None, query_embeds_audio=None,
         query_embeds_audio_lengths=None, placeholder_audio_loc_lens=None, target_embeds=None):
@@ -251,28 +225,17 @@ class BailingMMNativeForConditionalGeneration(PreTrainedModel):
         if query_embeds_image is None and query_embeds_video is None and query_embeds_audio is None and target_embeds is None:
             return inputs_embeds
 
-        audio_start_indices_list = None
-        audio_end_indices_list = None
-        image_start_indices_list = None
-        image_end_indices_list = None
-      
-        batch_size = input_ids.shape[0]
-
+        image_mask = None
+        audio_mask = None
         if query_embeds_image is not None:
-            inputs_embeds, image_start_indices_list, image_end_indices_list = self.prompt_wrap_vision(input_ids, inputs_embeds, query_embeds_image)
+            inputs_embeds, image_mask = self.prompt_wrap_vision(input_ids, inputs_embeds, query_embeds_image)
         if query_embeds_video is not None:
-            inputs_embeds, image_start_indices_list, image_end_indices_list = self.prompt_wrap_vision(input_ids, inputs_embeds, query_embeds_video)
+            inputs_embeds, image_mask = self.prompt_wrap_vision(input_ids, inputs_embeds, query_embeds_video)
         if query_embeds_audio is not None:
-            inputs_embeds, audio_start_indices_list, audio_end_indices_list = self.prompt_wrap_audio(
+            inputs_embeds, audio_mask = self.prompt_wrap_audio(
                 input_ids, inputs_embeds, query_embeds_audio, query_embeds_audio_lengths, placeholder_audio_loc_lens,
             )
-
-        if audio_start_indices_list is None: audio_start_indices_list = [99999] * batch_size
-        if audio_end_indices_list is None: audio_end_indices_list = [99999] * batch_size
-        if image_start_indices_list is None: image_start_indices_list = [99999] * batch_size
-        if image_end_indices_list is None: image_end_indices_list = [99999] * batch_size
-
-        return inputs_embeds, image_start_indices_list, image_end_indices_list, audio_start_indices_list, audio_end_indices_list
+        return inputs_embeds, image_mask, audio_mask
 
     def forward(
         self,
@@ -293,6 +256,7 @@ class BailingMMNativeForConditionalGeneration(PreTrainedModel):
         audio_feats_lengths: Optional[torch.LongTensor] = None,
         audio_placeholder_loc_lens: Optional[torch.LongTensor] = None,
         past_key_values: Optional[List[torch.Tensor]] = None,
+        use_whisper_encoder: bool = False
     ) -> Union[Tuple, BailingMMCausalLMOutputWithPast]:
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
         output_hidden_states = (
@@ -317,18 +281,15 @@ class BailingMMNativeForConditionalGeneration(PreTrainedModel):
         if pixel_values_videos is not None:
             video_embeds = self.extract_image_feature(pixel_values_videos, grid_thw=video_grid_thw)
         if audio_feats is not None:
-            audio_embeds, audio_embeds_lengths = self.extract_audio_feature(audio_feats, audio_feats_lengths)
+            audio_embeds, audio_embeds_lengths = self.extract_audio_feature(audio_feats, audio_feats_lengths, use_whisper_encoder=use_whisper_encoder)
 
         if (image_embeds is None and video_embeds is None and audio_embeds is None) or input_ids.size(1) == 1:
             words_embeddings = self.model.get_input_embeddings()(input_ids.clip(0, self.model.get_input_embeddings().weight.shape[0] - 1))
-            batch_size = input_ids.size(0) if input_ids is not None else inputs_embeds.size(0)
-            image_indices = [999999] * batch_size
-            image_end_indices = [999999] * batch_size
-            audio_indices = [999999] * batch_size
-            audio_end_indices = [999999] * batch_size
+            image_mask = None
+            audio_mask = None
 
         else:
-            words_embeddings, image_indices, image_end_indices, audio_indices, audio_end_indices = self.prompt_wrap_navit(
+            words_embeddings, image_mask, audio_mask = self.prompt_wrap_navit(
                     input_ids.clip(0, self.model.get_input_embeddings().weight.shape[0] - 1), image_embeds, video_embeds, audio_embeds,
                     audio_embeds_lengths, audio_placeholder_loc_lens, None,  # noqa
             )
@@ -344,10 +305,8 @@ class BailingMMNativeForConditionalGeneration(PreTrainedModel):
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
-            image_indices=image_indices,
-            image_end_indices=image_end_indices,
-            audio_indices=audio_indices,
-            audio_end_indices=audio_end_indices,
+            image_mask=image_mask,
+            audio_mask=audio_mask,
         )
 
         return BailingMMCausalLMOutputWithPast(
@@ -356,3 +315,244 @@ class BailingMMNativeForConditionalGeneration(PreTrainedModel):
             past_key_values=outputs.past_key_values,
             hidden_states=outputs.hidden_states,
         )
+
+    def append_input_ids_with_multiscale_learnable_tokens(   
+        self, 
+        text_ids,
+        attention_mask,
+        scales,
+        start_token_id,
+        end_token_id,
+        patch_token_id,
+    ):
+        assert text_ids.shape[0] == 1
+        assert attention_mask.shape == text_ids.shape
+        gen_mask = torch.zeros_like(attention_mask)
+        for scale in scales:
+            text_ids = torch.cat([
+                text_ids, 
+                torch.tensor([[start_token_id]]).to(text_ids.dtype).to(text_ids.device),
+                torch.tensor([[patch_token_id] * (scale ** 2)]).to(text_ids.dtype).to(text_ids.device),
+                torch.tensor([[end_token_id]]).to(text_ids.dtype).to(text_ids.device),
+            ], dim=1)
+            attention_mask = torch.cat([
+                attention_mask, 
+                torch.tensor([[1] * ((scale ** 2) + 2)]).to(attention_mask.dtype).to(attention_mask.device),
+            ], dim=1)
+            gen_mask = torch.cat([
+                gen_mask, 
+                torch.tensor([[0]]).to(gen_mask.dtype).to(gen_mask.device),
+                torch.tensor([[1] * (scale ** 2)]).to(gen_mask.dtype).to(gen_mask.device),
+                torch.tensor([[0]]).to(gen_mask.dtype).to(gen_mask.device),
+            ], dim=1)
+        assert text_ids.shape == attention_mask.shape
+        assert attention_mask.shape == gen_mask.shape
+        return text_ids, attention_mask, gen_mask
+
+    @torch.no_grad()
+    def generate(
+        self,
+        input_ids: torch.LongTensor = None,
+        attention_mask: Optional[torch.Tensor] = None,
+        position_ids: Optional[torch.LongTensor] = None,
+        use_cache: Optional[bool] = None,
+        pixel_values: Optional[torch.FloatTensor] = None,
+        pixel_values_videos: Optional[torch.FloatTensor] = None,
+        audio_feats: Optional[torch.FloatTensor] = None,
+        image_grid_thw: Optional[torch.LongTensor] = None,
+        video_grid_thw: Optional[torch.LongTensor] = None,
+        audio_feats_lengths: Optional[torch.LongTensor] = None,
+        audio_placeholder_loc_lens: Optional[torch.LongTensor] = None,
+        past_key_values: Optional[List[torch.Tensor]] = None,
+        image_gen: Optional[bool] = False,
+        image_gen_steps: Optional[int] = 30,
+        image_gen_seed: Optional[int] = 0,
+        image_gen_cfg: Optional[float] = 3.5,
+        image_gen_height: Optional[int] = 512,
+        image_gen_width: Optional[int] = 512,
+        **generate_kwargs,
+    ):
+        image_embeds, video_embeds, audio_embeds, audio_embeds_lengths = None, None, None, None
+        if pixel_values is not None:
+            image_embeds = self.extract_image_feature(pixel_values, grid_thw=image_grid_thw)
+        if pixel_values_videos is not None:
+            video_embeds = self.extract_image_feature(pixel_values_videos, grid_thw=video_grid_thw)
+
+        if image_gen:
+            assert self.loaded_image_gen_modules is True
+            input_ids, attention_mask, gen_mask = self.append_input_ids_with_multiscale_learnable_tokens(
+                input_ids,
+                attention_mask,
+                [4, 8, 16], #self.img_gen_scales,
+                self.config.llm_config.image_patch_token + 1,
+                self.config.llm_config.image_patch_token + 2,
+                self.config.llm_config.image_patch_token,
+            )
+            query_tokens_embeds = torch.cat(
+                [self.query_tokens_dict[f"{scale}x{scale}"] for scale in self.img_gen_scales], 
+                dim=0,
+            )
+            if image_embeds is None:
+                image_embeds = query_tokens_embeds
+            else:
+                image_embeds = torch.cat([image_embeds, query_tokens_embeds], dim=0)
+            with torch.cuda.amp.autocast(dtype=torch.bfloat16):
+                assert video_embeds is None and audio_embeds is None
+                if (image_embeds is None and video_embeds is None and audio_embeds is None) or input_ids.size(1) == 1:
+                    words_embeddings = self.model.get_input_embeddings()(input_ids.clip(0, self.model.get_input_embeddings().weight.shape[0] - 1))
+                    image_mask = None
+                    audio_mask = None
+                else:
+                    words_embeddings, image_mask, audio_mask = self.prompt_wrap_navit(
+                            input_ids.clip(0, self.model.get_input_embeddings().weight.shape[0] - 1), image_embeds, video_embeds, audio_embeds,
+                            audio_embeds_lengths, audio_placeholder_loc_lens, None,  # noqa
+                    )
+                outputs = self.model.forward(
+                    input_ids=None,
+                    attention_mask=attention_mask,
+                    position_ids=position_ids,
+                    past_key_values=None,
+                    inputs_embeds=words_embeddings,
+                    use_cache=use_cache,
+                    image_mask=image_mask,
+                    audio_mask=audio_mask,
+                    output_hidden_states=True,
+                )
+                hidden_states = outputs.hidden_states[-1]
+                gen_mask = gen_mask.unsqueeze(-1).expand(gen_mask.shape[0], gen_mask.shape[1], hidden_states.shape[-1]).to(hidden_states.device).bool()
+                hidden_states_gen = torch.masked_select(hidden_states, gen_mask).view(hidden_states.shape[0], -1, hidden_states.shape[-1])
+                # 分解hidden_states为不同尺度的表示
+                scale_start_idxes = [0] + self.scale_indices[:-1]
+                scale_end_idxes = self.scale_indices
+                assert scale_end_idxes[-1] == hidden_states_gen.shape[1]
+                new_query_embeds_images = {}
+                for scale, scale_start_idx, scale_end_idx in [
+                    i for i in zip(self.img_gen_scales, scale_start_idxes, scale_end_idxes)
+                ][-1:]:   
+                    scale_name = f"{scale}x{scale}"
+                    scale_hidden = hidden_states_gen[:, scale_start_idx : scale_end_idx, :]
+                    
+                    # 处理当前尺度的特征
+                    scale_embeds = self.proj_in(scale_hidden)
+                    seq_shape = scale_embeds.shape
+                    #print("scale: {}, seq_shape: {}".format(scale, seq_shape))
+                    with torch.cuda.amp.autocast(dtype=torch.bfloat16):
+                        scale_embeds = self.connector(
+                            inputs_embeds=scale_embeds, 
+                            attention_mask=torch.ones(seq_shape[0],1,seq_shape[1],seq_shape[1]).to(scale_embeds.device), 
+                            output_hidden_states=True
+                        ).hidden_states[-1]
+                    scale_embeds = self.proj_out(scale_embeds)
+                    
+                    # 归一化
+                    scale_embeds = torch.nn.functional.normalize(scale_embeds, dim=-1)
+                    new_query_embeds_images[scale_name] = scale_embeds
+                
+                imgs = []
+                for scale in self.img_gen_scales[-1:]:
+                    imgs.append(
+                        self.diffusion_loss.sample(
+                            new_query_embeds_images[f"{scale}x{scale}"], 
+                            steps=image_gen_steps, 
+                            seed=image_gen_seed, 
+                            cfg=image_gen_cfg, 
+                            height=image_gen_height, 
+                            width=image_gen_width
+                        )
+                    )
+                return imgs[-1] 
+        
+        with torch.cuda.amp.autocast(dtype=torch.bfloat16):
+            if audio_feats is not None:
+                use_whisper_encoder = generate_kwargs.pop('use_whisper_encoder', False)
+                audio_embeds, audio_embeds_lengths = self.extract_audio_feature(audio_feats, audio_feats_lengths,
+                                                                                use_whisper_encoder=use_whisper_encoder)
+            if (image_embeds is None and video_embeds is None and audio_embeds is None) or input_ids.size(1) == 1:
+                words_embeddings = self.model.get_input_embeddings()(input_ids.clip(0, self.model.get_input_embeddings().weight.shape[0] - 1))
+                image_mask = None
+                audio_mask = None
+            else:
+                words_embeddings, image_mask, audio_mask = self.prompt_wrap_navit(
+                        input_ids.clip(0, self.model.get_input_embeddings().weight.shape[0] - 1), image_embeds, video_embeds, audio_embeds,
+                        audio_embeds_lengths, audio_placeholder_loc_lens, None,  # noqa
+                )
+
+            outputs = self.model.generate(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                position_ids=position_ids,
+                past_key_values=past_key_values,
+                inputs_embeds=words_embeddings,
+                use_cache=use_cache,
+                image_mask=image_mask,
+                audio_mask=audio_mask,
+                **generate_kwargs,
+            )
+        return outputs
+
+    def load_image_gen_modules(self, inference_model_path):
+        from transformers import AutoModelForCausalLM
+        from diffusion.sana_loss import SANALoss
+        import os
+        from safetensors.torch import load_file
+        
+        temp_state_dict = load_file(os.path.join(inference_model_path, 'mlp', 'model.safetensors'))
+        
+        self.query_tokens_dict = nn.ParameterDict()
+        self.img_gen_scales = [4, 8, 16]
+        for scale in self.img_gen_scales:                    
+            num_tokens = scale * scale
+            scale_name = f"{scale}x{scale}"
+            #weights = temp_state_dict[f"query_tokens_dict.{scale_name}"]
+            self.query_tokens_dict[scale_name] = nn.Parameter(
+                torch.nn.functional.normalize(torch.randn(num_tokens, self.model.config.hidden_size), dim=-1)
+            )
+        self.query_tokens_dict.to(self.model.dtype).to(self.model.device)
+        modified_state_dict_query_tokens = {
+            f"{scale}x{scale}": temp_state_dict[f"query_tokens_dict.{scale}x{scale}"]
+            for scale in self.img_gen_scales   
+        }
+        self.query_tokens_dict.load_state_dict(modified_state_dict_query_tokens, strict=True)
+        # 计算各尺度的累积索引
+        self.scale_indices = []
+        current_idx = 0
+        for scale in self.img_gen_scales:
+            current_idx += scale * scale
+            self.scale_indices.append(current_idx)
+        
+        diffusion_mlp_state_dict = {
+            key[len("mlp.") :] : temp_state_dict[key]
+            for key in temp_state_dict if key.startswith("mlp.")
+        }
+        self.diffusion_loss = SANALoss(
+            model_path=inference_model_path, 
+            scheduler_path=inference_model_path, 
+            vision_dim=self.model.config.hidden_size, 
+            #mlp_checkpoint_path=os.path.join(inference_model_path, 'mlp', 'model.safetensors'),
+            mlp_state_dict=diffusion_mlp_state_dict,
+            trainable_params="None",
+        )
+        self.diffusion_loss.to(self.model.device)
+        #self.norm_query_embeds = True
+        # load connector
+        self.connector = AutoModelForCausalLM.from_pretrained(os.path.join(inference_model_path, 'connector'))
+        for layer in self.connector.model.layers:
+            layer.self_attn.is_causal = False
+        self.connector.to(self.model.device)
+        
+        self.proj_in = nn.Linear(self.model.config.hidden_size, self.connector.config.hidden_size)
+        self.proj_out = nn.Linear(self.connector.config.hidden_size, self.model.config.hidden_size)
+        
+        modified_state_dict_in = {
+            'weight': temp_state_dict['proj_in.weight'],
+            'bias': temp_state_dict['proj_in.bias']
+        }
+        self.proj_in.load_state_dict(modified_state_dict_in, strict=True)
+        modified_state_dict_out = {
+            'weight': temp_state_dict['proj_out.weight'],
+            'bias': temp_state_dict['proj_out.bias']
+        }
+        self.proj_out.load_state_dict(modified_state_dict_out, strict=True)
+        self.proj_in.to(self.model.device)
+        self.proj_out.to(self.model.device)
+        self.loaded_image_gen_modules = True

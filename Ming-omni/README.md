@@ -24,6 +24,7 @@ Ming-Lite-Omni-Preview is built upon [Ling-Lite](https://github.com/inclusionAI/
 
 - **Natural Speech Generation and Fine-grained Voice Dialogue**: Supports dialect understanding and generation in end-to-end conversations, enables one-shot voice cloning, and enhances prosody through audio tokenizer compression
 
+- **Unified Understanding and Generation**: Integrates comprehension and generation capabilities, supporting native-resolution image generation, editing, and style transfer. Achieves a GenEval score of 0.64, significantly outperforming mainstream generative models like SDXL.
 
 ## Evaluation
 
@@ -94,16 +95,15 @@ Ming-Lite-Omni-Preview is built upon [Ling-Lite](https://github.com/inclusionAI/
 
 <div align="center">
 
-| **Model**              | **Aishell-1** | **Aishell-2 ios** | **Wenetspeech test-net** | **Wenet test-meeting** | **Librispeech test-clean** | **Librispeech test-other** |
-| :--------------------- | :-----------: | :---------------: | :----------------------: | :--------------------: | :------------------------: | :------------------------: |
-| Whisper Large-v3       |     5.14      |       4.76        |           9.68           |         18.54          |            1.9             |            3.65            |
-| Qwen2-Audio            |     1.53      |       3.06        |           7.72           |          8.4           |         <b>1.6</b>         |            3.6             |
-| GLM-4-voice Base       |     2.46      |         -         |            -             |           -            |            2.82            |            7.66            |
-| Baichuan-Omni-1.5      |       -       |         -         |           6.9            |          8.4           |             -              |             -              |
-| Qwen2.5-Omni           |  <b>1.18</b>  |    <b>2.36</b>    |        <b>5.9</b>        |          7.7           |            1.8             |         <b>3.4</b>         |
-| Ming-Lite-Omni-Preview |     1.62      |       2.82        |           6.23           |       <b>6.9</b>       |            2.34            |            5.74            |
+| Model          | aishell1 | aishell2_android | aishell2_ios | cv15_zh  | fleurs_zh | wenetspeech_meeting | wenetspeech_net | librispeech_test_clean | librispeech_test_other | multilingual_librispeech | cv15_en  | fleurs_en | voxpopuli_v1.0_en |
+|:---------------|:--------:|:----------------:|:------------:|:--------:|:---------:|:-------------------:|:---------------:|:----------------------:|:----------------------:|:------------------------:|:--------:|:---------:|:-----------------:|
+| Ming-Lite-Omni |   1.49   |     **2.58**     |   **2.58**   |   6.53   | **2.97**  |        5.91         |    **5.56**     |          1.42          |          2.77          |         **4.18**         | **6.91** | **3.40**  |       5.82        |
+| Qwen2.-Omni    |   1.18   |       2.75       |     2.63     | **5.20** |   3.00    |      **5.90**       |      7.70       |          1.80          |          3.40          |           7.56           |   7.60   |   4.10    |     **5.80**      |
+| Qwen2-Audio    |   1.53   |       2.92       |     2.92     |   6.90   |   7.50    |        7.16         |      8.42       |          1.60          |          3.60          |           5.40           |   8.60   |   6.90    |       6.84        |
+| Kimi-Audio     | **0.76** |       2.64       |     2.87     |   7.21   |   3.00    |        9.14         |      6.28       |        **1.31**        |        **2.58**        |           5.88           |  10.31   |   4.74    |       7.97        |
 
 </div>
+
 
 
 ### Knowledge
@@ -132,6 +132,22 @@ Ming-Lite-Omni-Preview is built upon [Ling-Lite](https://github.com/inclusionAI/
 | ScreenSpot       |          79.3          |      <b>84.7</b>       |
 </div>
 
+
+### Unified Generation Benchmark
+
+<div align="center">
+
+| Model              | single_object | two_object | counting | colors | position | color_attr | GENEVAL | DPGBench | FID   |
+|:-------------------|:-------------:|:----------:|:--------:|:------:|:--------:|:----------:|:-------:|:--------:|:-----:|
+| Ming-Lite-Omni     | 98.75%        | 77.27%     | 68.12%   | 78.72% | 31%      | 29.04%     | 0.63819 | -        | -     |
+| Metaquery-XL       | -             | -          | -        | -      | -        | -          | 0.61    | 82.05    | 6.02  |
+| SDv2.1             | 0.98          | 0.51       | 0.44     | 0.85   | 0.07     | 0.17       | 0.50    | 68.09    | 26.96 |
+| Emu3-Gen           | 0.98          | 0.71       | 0.34     | 0.81   | 0.17     | 0.21       | 0.54    | 80.60    | -     |
+| SDXL               | 0.98          | 0.74       | 0.39     | 0.85   | 0.15     | 0.23       | 0.55    | 74.65    | 8.76  |
+| Janus              | 0.97          | 0.68       | 0.30     | 0.84   | 0.46     | 0.42       | 0.61    | 79.68    | 10.10 |
+| JanusFlow          | -             | -          | -        | -      | -        | -          | 0.63    | 80.09    | 9.51  |
+
+</div>
 
 
 ## Model Downloads
@@ -223,11 +239,16 @@ If you're in mainland China, we strongly recommend you to download our model fro
 
 
 ## Quickstart
-
+Python environment dependency installation.
+```shell
+pip install -r requirements.txt
+pip install data/matcha_tts-0.0.5.1-cp38-cp38-linux_x86_64.whl
+```
 Please download our model following [Model Downloads](#model-downloads), then you can refer to the following codes to run Ming-Lite-Omni-Preview model.
 
 ```python
 import os
+import torch
 from transformers import AutoProcessor
 from modeling_bailingmm import BailingMMNativeForConditionalGeneration
 
@@ -387,7 +408,7 @@ messages = [
         ],
     },
 ]
-outputs = model.generate(messages, max_new_tokens=512)
+outputs = model.generate(messages, max_new_tokens=512, use_whisper_encoder=True)
 print(outputs)
 ```
 
@@ -405,7 +426,83 @@ outputs = model.generate(messages, max_new_tokens=512, speaker='luna', output_au
 print(outputs)
 ```
 
+### Image Generation & Edit
 
-## License and Legal Disclaimer
+Load additional modules for generation.
 
-This code repository is licensed under the [MIT License](../LICENSE), and the Legal Disclaimer is located in the [LEGAL.md file](../LEGAL.md) under the project's root directory.
+```python
+model_path = MING_OMNI_PATH
+model.load_image_gen_modules(model_path)
+
+# Image generation mode currently limits the range of input pixels.
+gen_input_pixels = 451584
+processor.max_pixels = gen_input_pixels
+processor.min_pixels = gen_input_pixels
+
+def generate(messages, processor, model, **image_gen_param):
+    text = processor.apply_chat_template(messages, add_generation_prompt=True)
+    image_inputs, video_inputs, audio_inputs = processor.process_vision_info(messages)
+
+    inputs = processor(
+        text=[text],
+        images=image_inputs,
+        videos=video_inputs,
+        audios=audio_inputs,
+        return_tensors="pt",
+    ).to(model.device)
+
+    for k in inputs.keys():
+        if k == "pixel_values" or k == "pixel_values_videos" or k == "audio_feats":
+            inputs[k] = inputs[k].to(dtype=torch.bfloat16)
+    
+    print(image_gen_param)
+    image = model.generate(
+        **inputs,
+        image_gen=True,
+        **image_gen_param,
+    )
+    return image
+
+```
+
+Text-to-image
+```python
+messages = [
+    {
+        "role": "HUMAN",
+        "content": [
+            {"type": "text", "text": "Draw a girl with short hair."},
+        ],
+    }
+]
+image = generate(
+   messages=messages, processor=processor, model=model, 
+   image_gen_cfg=6.0, image_gen_steps=20, image_gen_width=480, image_gen_height=544
+)
+image.save("./t2i.jpg")
+```
+
+Edit
+```python
+messages = [
+    {
+        "role": "HUMAN",
+        "content": [
+            {"type": "image", "image": "samples/cake.jpg"},
+            {"type": "text", "text": "add a candle on top of the cake"},
+        ],
+    }
+]
+image = generate(
+   messages=messages, processor=processor, model=model, 
+   image_gen_cfg=6.0, image_gen_steps=20, image_gen_width=512, image_gen_height=512
+)
+image.save("./edit.jpg")
+```
+
+
+## License
+
+This code repository is licensed under [the MIT License](https://github.com/inclusionAI/Ming/blob/master/LICENCE).
+
+

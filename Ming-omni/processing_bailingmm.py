@@ -67,7 +67,7 @@ class BailingMMProcessorKwargs(ProcessingKwargs, total=False):
         "text_kwargs": {"padding": False, "padding_side": "right"},
         "image_kwargs": {},
         "video_kwargs": {},
-        "audio_kwargs": {"padding": "max_length", "return_tensors": True},
+        "audio_kwargs": {"padding": "max_length", "return_tensors": True, "use_whisper_encoder": False},
     }
 
 class BailingMMProcessor(ProcessorMixin):
@@ -175,6 +175,9 @@ class BailingMMProcessor(ProcessorMixin):
             tokenizer_init_kwargs=self.tokenizer.init_kwargs,
             **kwargs,
         )
+        for key in output_kwargs.keys():
+            if key != 'audio_kwargs' and 'use_whisper_encoder' in output_kwargs[key]:
+                output_kwargs[key].pop('use_whisper_encoder')
 
         if isinstance(text, str):
             text = [text]
@@ -197,7 +200,7 @@ class BailingMMProcessor(ProcessorMixin):
 
         if audios is not None:
             audio_inputs = self.audio_processor(audios, **output_kwargs["audio_kwargs"])
-            text = self._expand_audio_tokens(text, audio_inputs["audio_feats_lengths"])
+            text = self._expand_audio_tokens(text, audio_inputs["encoder_feats_lengths"])
 
         # Padding side can be in TextKwargs but is not accepted by the tokenizer
         _ = output_kwargs["text_kwargs"].pop("padding_side", None)
@@ -209,9 +212,10 @@ class BailingMMProcessor(ProcessorMixin):
             loc_lens = []
             for i, input_ids_sample in enumerate(text_inputs["input_ids"]):
                 loc_lens.append([
-                    (input_ids_sample.tolist().index(audio_start_token) + 1, int(audio_inputs["audio_feats_lengths"][i].item()))
+                    (input_ids_sample.tolist().index(audio_start_token) + 1, int(audio_inputs["encoder_feats_lengths"][i].item()))
                 ])
             audio_inputs["audio_placeholder_loc_lens"] = torch.tensor(loc_lens, dtype=torch.long)
+            audio_inputs.pop('encoder_feats_lengths')
 
         return BatchFeature(data={**text_inputs, **image_inputs, **video_inputs, **audio_inputs})
 

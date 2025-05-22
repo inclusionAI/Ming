@@ -18,6 +18,8 @@ from qwen2_5_vit import Qwen2_5_VLVisionConfig
 from configuration_audio import GLMAudioConfig
 from configuration_bailing_moe import BailingMoeConfig
 from configuration_bailing_talker import BailingTalkerConfig
+from configuration_whisper_encoder import WhisperEncoderConfig
+
 
 class BailingMMConfig(PretrainedConfig):
     model_type = "bailingmm"
@@ -28,6 +30,7 @@ class BailingMMConfig(PretrainedConfig):
         llm_config: BailingMoeConfig = None,
         vision_config: Qwen2_5_VLVisionConfig = None,
         audio_config: GLMAudioConfig = None,
+        whisper_config: WhisperEncoderConfig = None,
         talker_config: BailingTalkerConfig = None,
         **kwargs
     ):
@@ -36,4 +39,5 @@ class BailingMMConfig(PretrainedConfig):
         self.llm_config = BailingMoeConfig(**llm_config) if isinstance(llm_config, dict) else llm_config
         self.mlp_depth = mlp_depth
         self.talker_config = BailingTalkerConfig(**talker_config) if isinstance(talker_config, dict) else talker_config
+        self.whisper_config = WhisperEncoderConfig(**whisper_config) if isinstance(whisper_config, dict) else whisper_config
         super().__init__(**kwargs)

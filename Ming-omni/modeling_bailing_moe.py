@@ -416,30 +416,25 @@ class BailingMoeSparseMoeBlock(nn.Module):
         end_indices = torch.tensor(end_indices, device=device).view(-1, 1)
         return (indices > start_indices) & (indices < end_indices)
         
-    def forward(self, hidden_states: torch.Tensor,
-                image_start_indices: Optional[List[int]],
-                image_end_indices: Optional[List[int]],
-                audio_start_indices: Optional[List[int]],
-                audio_end_indices: Optional[List[int]]):
+    def forward(
+        self, 
+        hidden_states: torch.Tensor,
+        image_mask: Optional[torch.Tensor] = None,
+        audio_mask: Optional[torch.Tensor] = None,
+    ):
         identity = hidden_states
         bsz, seq_len, h = hidden_states.shape
 
         if self.multi_gate:
-            indices = torch.arange(seq_len, device=hidden_states.device).unsqueeze(0).expand(bsz, seq_len)
-            has_image = len(image_start_indices) != 0 and len(image_end_indices) != 0
-            has_audio = len(audio_start_indices) != 0 and len(audio_end_indices) != 0
             # Get base text router results
             topk_idx, topk_weight, router_logits = self.gate(hidden_states)
-            # router_probs = text_router_probs
-            # router_logits = text_router_logits
-            # top1_expert_index = text_top1_expert_index
 
-            image_mask = None
-            audio_mask = None
+            # Verify mask consistency when both modalities exist
+            if image_mask is not None and audio_mask is not None:
+                assert torch.logical_and(image_mask, audio_mask).sum() == 0
 
             # Process image modality
-            if has_image:
-                image_mask = self.create_mask(hidden_states.device, image_start_indices, image_end_indices, indices)
+            if image_mask is not None:
                 image_topk_idx, image_topk_weight, image_router_logits = self.image_gate(hidden_states)
                 image_mask = image_mask.reshape(bsz * seq_len, 1)
 
@@ -448,8 +443,7 @@ class BailingMoeSparseMoeBlock(nn.Module):
                 router_logits = router_logits * ~image_mask + image_router_logits * image_mask
 
             # Process audio modality
-            if has_audio:
-                audio_mask = self.create_mask(hidden_states.device, audio_start_indices, audio_end_indices, indices)
+            if audio_mask is not None:
                 audio_topk_idx, audio_topk_weight, audio_router_logits = self.audio_gate(hidden_states)
                 audio_mask = audio_mask.reshape(bsz * seq_len, 1)
 
@@ -457,14 +451,6 @@ class BailingMoeSparseMoeBlock(nn.Module):
                 topk_weight = topk_weight * ~audio_mask + audio_topk_weight * audio_mask
                 router_logits = router_logits * ~audio_mask + audio_router_logits * audio_mask
 
-            # Verify mask consistency when both modalities exist
-            if has_image and has_audio:
-                assert torch.logical_and(image_mask, audio_mask).sum() == 0
-            # Error handling when no modalities found
-            if not has_image and not has_audio:
-                print(f'Error: No modalities found - '
-                    f'Image: {len(image_start_indices)}/{len(image_end_indices)}, '
-                    f'Audio: {len(audio_start_indices)}/{len(audio_end_indices)}')
         else:
             topk_idx, topk_weight, router_logits = self.gate(hidden_states)
         hidden_states = hidden_states.view(-1, hidden_states.shape[-1])
@@ -1024,10 +1010,8 @@ class BailingMoeDecoderLayer(nn.Module):
         hidden_states: torch.Tensor,
         attention_mask: Optional[torch.Tensor] = None,
         position_ids: Optional[torch.LongTensor] = None,
-        image_start_indices: Optional[List[int]] = None,
-        image_end_indices: Optional[List[int]] = None,
-        audio_start_indices: Optional[List[int]] = None,
-        audio_end_indices: Optional[List[int]] = None,
+        image_mask: Optional[torch.Tensor] = None,
+        audio_mask: Optional[torch.Tensor] = None,
         past_key_value: Optional[Tuple[torch.Tensor]] = None,
         output_attentions: Optional[bool] = False,
         output_router_logits: Optional[bool] = False,
@@ -1077,11 +1061,7 @@ class BailingMoeDecoderLayer(nn.Module):
         # Fully Connected
         residual = hidden_states
         hidden_states = self.post_attention_layernorm(hidden_states)
-        hidden_states = self.mlp(hidden_states,
-                                 image_start_indices,
-                                 image_end_indices,
-                                 audio_start_indices,
-                                 audio_end_indices)
+        hidden_states = self.mlp(hidden_states, image_mask, audio_mask)
         if isinstance(hidden_states, tuple):
             hidden_states, router_logits = hidden_states
         else:
@@ -1263,10 +1243,8 @@ class BailingMoeModel(BailingMoePreTrainedModel):
         output_hidden_states: Optional[bool] = None,
         output_router_logits: Optional[bool] = None,
         return_dict: Optional[bool] = None,
-        image_start_indices: Optional[List[int]] = None,
-        image_end_indices: Optional[List[int]] = None,
-        audio_start_indices: Optional[List[int]] = None,
-        audio_end_indices: Optional[List[int]] = None,
+        image_mask: Optional[torch.Tensor] = None,
+        audio_mask: Optional[torch.Tensor] = None,
         **kwargs,
     ) -> Union[Tuple, MoeModelOutputWithPast]:
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
@@ -1351,10 +1329,8 @@ class BailingMoeModel(BailingMoePreTrainedModel):
                     hidden_states,
                     attention_mask,
                     position_ids,
-                    image_start_indices,
-                    image_end_indices,
-                    audio_start_indices,
-                    audio_end_indices,
+                    image_mask,
+                    audio_mask,
                     past_key_values,
                     output_attentions,
                     output_router_logits,
@@ -1365,10 +1341,8 @@ class BailingMoeModel(BailingMoePreTrainedModel):
                     hidden_states,
                     attention_mask=attention_mask,
                     position_ids=position_ids,
-                    image_start_indices=image_start_indices,
-                    image_end_indices=image_end_indices,
-                    audio_start_indices=audio_start_indices,
-                    audio_end_indices=audio_end_indices,
+                    image_mask=image_mask,
+                    audio_mask=audio_mask,
                     past_key_value=past_key_values,
                     output_attentions=output_attentions,
                     output_router_logits=output_router_logits,
@@ -1473,10 +1447,8 @@ class BailingMoeForCausalLM(BailingMoePreTrainedModel):
         output_hidden_states: Optional[bool] = None,
         output_router_logits: Optional[bool] = None,
         return_dict: Optional[bool] = None,
-        image_start_indices: Optional[List[int]] = None,
-        image_end_indices: Optional[List[int]] = None,
-        audio_start_indices: Optional[List[int]] = None,
-        audio_end_indices: Optional[List[int]] = None,
+        image_mask: Optional[torch.Tensor] = None,
+        audio_mask: Optional[torch.Tensor] = None,
         **kwargs,
     ) -> Union[Tuple, MoeCausalLMOutputWithPast]:
         r"""
@@ -1524,10 +1496,8 @@ class BailingMoeForCausalLM(BailingMoePreTrainedModel):
             output_hidden_states=output_hidden_states,
             output_router_logits=output_router_logits,
             return_dict=return_dict,
-            image_start_indices=image_start_indices,
-            image_end_indices=image_end_indices,
-            audio_start_indices=audio_start_indices,
-            audio_end_indices=audio_end_indices,
+            image_mask=image_mask,
+            audio_mask=audio_mask,
             **kwargs,
         )
 
@@ -1573,11 +1543,10 @@ class BailingMoeForCausalLM(BailingMoePreTrainedModel):
         past_key_values=None, 
         attention_mask=None, 
         inputs_embeds=None, 
+        cache_position=None,
         token_type_ids=None,
-        image_start_indices=None,
-        image_end_indices=None,
-        audio_start_indices=None,
-        audio_end_indices=None,
+        image_mask=None,
+        audio_mask=None,
         **kwargs
     ):
         if past_key_values is not None:
@@ -1592,6 +1561,10 @@ class BailingMoeForCausalLM(BailingMoePreTrainedModel):
             else:
                 cache_length = past_length = past_key_values[0][0].shape[2]
                 max_cache_length = None
+            if inputs_embeds is not None:
+                input_ids = input_ids[:, -cache_position.shape[0]:]
+            elif input_ids.shape[1] != cache_position.shape[0]:
+                input_ids = input_ids[:, cache_position]
 
             # Keep only the unprocessed tokens:
             # 1 - If the length of the attention_mask exceeds the length of input_ids, then we are in a setting where
@@ -1621,10 +1594,12 @@ class BailingMoeForCausalLM(BailingMoePreTrainedModel):
                 position_ids = position_ids[:, -input_ids.shape[1] :]
 
         # if `inputs_embeds` are passed, we only want to use them in the 1st generation step
-        if inputs_embeds is not None and past_key_values is None:
+        if inputs_embeds is not None and len(cache_position) == inputs_embeds.shape[1]:
             model_inputs = {"inputs_embeds": inputs_embeds}
         else:
             model_inputs = {"input_ids": input_ids}
+            image_mask = None
+            audio_mask = None
 
         model_inputs.update(
             {
@@ -1632,10 +1607,8 @@ class BailingMoeForCausalLM(BailingMoePreTrainedModel):
                 "past_key_values": past_key_values,
                 "use_cache": kwargs.get("use_cache"),
                 "attention_mask": attention_mask,
-                "image_start_indices": image_start_indices,
-                "image_end_indices": image_end_indices,
-                "audio_start_indices": audio_start_indices,
-                "audio_end_indices": audio_end_indices
+                "image_mask": image_mask,
+                "audio_mask": audio_mask,
             }
         )
         return model_inputs

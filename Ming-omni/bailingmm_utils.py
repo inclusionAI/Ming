@@ -268,10 +268,13 @@ def _read_video_decord(
     total_frames, video_fps = len(vr), vr.get_avg_fps()
     logger.info(f"decord:  {video_path=}, {total_frames=}, {video_fps=}, time={time.time() - st:.3f}s")
 
-    sample_method = ele.get("sample", "uniform")
+    sample_method = ele.get("sample", "sequence")
     # if sample_method == "sequence":
     #    total_frames = int(total_frames / video_fps * 2)
-    num_frames = get_frames(ele, int(total_frames / video_fps * 2))
+    if video_fps > 2.0 and total_frames / float(video_fps) > 5.0:
+        num_frames = get_frames(ele, int(total_frames / float(video_fps) * 2))
+    else:
+        num_frames = get_frames(ele, total_frames)
     frame_indices = sample_frames(
         num_frames=num_frames, total_frames=total_frames, sample=sample_method
     )
@@ -353,14 +356,19 @@ def fetch_video(ele: dict, image_factor: int = IMAGE_FACTOR, return_video_sample
             fetch_image({"image": video_element, **process_info}, size_factor=image_factor)
             for video_element in ele["video"]
         ]
-        if len(images) > ele["max_frames"]:
-                num_frames_target = ele["max_frames"]
-                print(ele["max_frames"])
-                interval = len(images) // num_frames_target  # 计算抽取间隔
-                images = [images[i] for i in range(0, len(images), interval)][:num_frames_target]
+        # if len(images) > ele["max_frames"]:
+        #         num_frames_target = ele["max_frames"]
+        #         print(ele["max_frames"])
+        #         interval = len(images) // num_frames_target  # 计算抽取间隔
+        #         images = [images[i] for i in range(0, len(images), interval)][:num_frames_target]
         num_frames = ceil_by_factor(len(images), FRAME_FACTOR)
         if len(images) < num_frames:
             images.extend([images[-1]] * (num_frames - len(images)))
+        if len(images) > ele["max_frames"]:
+            frame_indices = sample_frames(
+                num_frames=ele["max_frames"], total_frames=len(images), sample="uniform",
+            )
+            images = [images[i] for i in frame_indices]
         if return_video_sample_fps:
             return images, process_info.pop("sample_fps", 2.0)
         return images
@@ -421,6 +429,11 @@ def process_vision_info(
             else:
                 image_inputs.append(fetch_image(vision_info))
         elif "video" in vision_info or "video_url" in vision_info:
+            if is_video(vision_info['video']):
+                data_value = vision_info['video']
+            else:
+                data_value = [os.path.join(vision_info['video'], frame) for frame in os.listdir(vision_info['video'])]
+            vision_info['video']=data_value
             video_inputs.append(fetch_video(vision_info))
         elif "audio" in vision_info or "audio_url" in vision_info:
             if isinstance(vision_info["audio"], (tuple, list)):

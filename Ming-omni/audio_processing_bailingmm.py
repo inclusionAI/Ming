@@ -7,11 +7,11 @@ import torch
 import torch.utils.data
 import torchaudio
 import torchaudio.compliance.kaldi as kaldi
+import whisper
 from torch.nn.utils.rnn import pad_sequence
 
 from transformers.utils import TensorType
-from transformers.feature_extraction_utils import FeatureExtractionMixin
-from image_processing_bailingmm import BatchFeature
+from transformers.feature_extraction_utils import FeatureExtractionMixin, BatchFeature
 
 NORM_FACTOR_FOR_DTYPE = {
     torch.int8: 2**7,
@@ -49,10 +49,13 @@ DEFAULT_TTS_TOKEN = '<tts>'
 
 
 class BailingMMAudioProcessor(FeatureExtractionMixin):
-    def __init__(self, wav_frontend_args: Dict[str, Any], **kwargs):
+    def __init__(self, wav_frontend_args: Dict[str, Any]=None, whisper_frontend_args: Dict[str, Any]=None, **kwargs):
         super().__init__(**kwargs)
         self.sample_rate = 16000
-        self.wav_frontend = WavFrontend(**wav_frontend_args)
+        if wav_frontend_args is not None:
+            self.wav_frontend = WavFrontend(**wav_frontend_args)
+        if whisper_frontend_args is not None:
+            self.whisper_frontend = WhisperFrontend(**whisper_frontend_args)
 
     def to_dict(self) -> Dict[str, Any]:
         output = copy.deepcopy(self.__dict__)
@@ -60,6 +63,8 @@ class BailingMMAudioProcessor(FeatureExtractionMixin):
         output["wav_frontend"]["cmvn"] = output["wav_frontend"]["cmvn"].tolist()
         output["wav_frontend"]["_non_persistent_buffers_set"] = list(output["wav_frontend"]["_non_persistent_buffers_set"])
         output["audio_processor_type"] = self.__class__.__name__
+        if 'whisper_frontend' in output:
+            output["whisper_frontend"] = output["whisper_frontend"].__dict__
         return output
 
     @classmethod
@@ -85,13 +90,22 @@ class BailingMMAudioProcessor(FeatureExtractionMixin):
         """Preprocess an audio or a batch of audios."""
         return self.preprocess(audios, **kwargs)
 
-    def _preprocess_audio(self, waveform: torch.Tensor, sample_rate: int) -> torch.Tensor:
+    def _preprocess_audio(self, waveform: torch.Tensor, sample_rate: int, use_whisper_encoder: bool=False) -> torch.Tensor:
         waveform = normalize_audio_tensor(waveform, sample_rate, target_sample_rate=self.sample_rate)
-        audio_feat = self.wav_frontend(waveform.unsqueeze(0), [len(waveform)])[0].squeeze(0)
+        if not use_whisper_encoder:
+            audio_feat = self.wav_frontend(waveform.unsqueeze(0), [len(waveform)])[0].squeeze(0)
+        else:
+            audio_feat = self.whisper_frontend(waveform.unsqueeze(0), [len(waveform)])[0].squeeze(0)
         return audio_feat
 
-    def _make_batched_audios(self, audio_feat_list: List[torch.Tensor]) -> Dict[str, Any]:
+    def _make_batched_audios(self, audio_feat_list: List[torch.Tensor], use_whisper_encoder=False) -> Dict[str, Any]:
         audio_feats_lengths = torch.tensor([[audio_feat.shape[0]] for audio_feat in audio_feat_list], dtype=torch.long)
+        if not use_whisper_encoder:
+            encoder_feats_lengths = audio_feats_lengths
+        else:
+            # whisper + project layer has two conv
+            encoder_feats_lengths = ((audio_feats_lengths-3+2*1)//2+1-3+2*1)//2+1
+
         max_length = max(audio_feat.shape[0] for audio_feat in audio_feat_list)
         audio_feats = torch.stack(
             [
@@ -101,7 +115,7 @@ class BailingMMAudioProcessor(FeatureExtractionMixin):
                 ) for audio_feat in audio_feat_list
             ], dim=0,
         )
-        return {"audio_feats": audio_feats.numpy(), "audio_feats_lengths": audio_feats_lengths.numpy()}
+        return {"audio_feats": audio_feats.numpy(), "audio_feats_lengths": audio_feats_lengths.numpy(), "encoder_feats_lengths": encoder_feats_lengths}
 
     def preprocess(
         self,
@@ -110,10 +124,10 @@ class BailingMMAudioProcessor(FeatureExtractionMixin):
         **kwargs,
     ) -> BatchFeature:
         if isinstance(audios, List):
-            audio_inputs = self._make_batched_audios([self._preprocess_audio(waveform, sr) for waveform, sr in audios])
+            audio_inputs = self._make_batched_audios([self._preprocess_audio(waveform, sr, use_whisper_encoder=kwargs.get('use_whisper_encoder', False)) for waveform, sr in audios], use_whisper_encoder=kwargs.get('use_whisper_encoder', False))
         else:
             waveform, sr = audios
-            audio_inputs = self._make_batched_audios([self._preprocess_audio(waveform, sr)])
+            audio_inputs = self._make_batched_audios([self._preprocess_audio(waveform, sr, use_whisper_encoder=kwargs.get('use_whisper_encoder', False))])
         return BatchFeature(data=audio_inputs, tensor_type=return_tensors)
 
 
@@ -251,6 +265,23 @@ class WavFrontend(torch.nn.Module):
                                  padding_value=0.0)
         return feats_pad, feats_lens
 
+
+class WhisperFrontend:
+    def __init__(self, n_mels: int=128):
+        self.n_mels = n_mels
+
+    def __call__(self, input: torch.Tensor, input_lengths: List[int]):
+        """
+        input: [B, T]
+        input_lengths: [B]
+        """
+
+        assert input.size(0) == 1
+
+        mel = whisper.log_mel_spectrogram(input.squeeze(0), n_mels=self.n_mels).to(input.device)   # [n_mels, T]
+        feats_pad = mel.transpose(0, 1).unsqueeze(0)  # [B=1, T, n_mels]
+        feats_lens = torch.tensor([mel.size(1)], dtype=torch.long)  # [B=1]
+        return feats_pad, feats_lens
 
 def load_cmvn(cmvn_file):
     with open(cmvn_file, 'r', encoding='utf-8') as f:

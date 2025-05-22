@@ -9,7 +9,6 @@ tokenizers==0.20.3
 transformers==4.45.0
 grouped_gemm==0.1.4
 decord==0.6.0
-# 语音依赖
 hyperpyyaml
 modelscope
 onnxruntime
@@ -18,3 +17,4 @@ conformer
 diffusers
 lightning
 gdown
+openai-whisper==20240930

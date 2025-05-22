@@ -51,7 +51,7 @@ class BailingMMInfer:
         processor = AutoProcessor.from_pretrained(self.model_name_or_path, trust_remote_code=True)
         return model, tokenizer, processor
 
-    def generate(self, messages, max_new_tokens=512, speaker='luna', output_audio_path=None, output_audio=False):
+    def generate(self, messages, max_new_tokens=512, speaker='luna', output_audio_path=None, output_audio=False, use_whisper_encoder=False):
         text = self.processor.apply_chat_template(
             messages, tokenize=False, add_generation_prompt=True, use_system=True
         )
@@ -64,6 +64,7 @@ class BailingMMInfer:
             videos=video_inputs,
             audios=audio_inputs,
             return_tensors="pt",
+            audio_kwargs={'use_whisper_encoder': use_whisper_encoder}
         )
 
         inputs = inputs.to(self.device)
@@ -76,9 +77,10 @@ class BailingMMInfer:
             outputs = self.model.generate(
                 **inputs,
                 max_new_tokens=max_new_tokens,
-                use_cache=False,
+                use_cache=True,
                 eos_token_id=self.processor.gen_terminator,
-                generation_config=self.generation_config
+                generation_config=self.generation_config,
+                use_whisper_encoder=use_whisper_encoder
             )
 
         generated_ids = outputs.sequences
@@ -93,8 +95,8 @@ class BailingMMInfer:
         if self.model.talker is not None and output_audio:
             thinker_reply_part = outputs.hidden_states[0][0] + outputs.hidden_states[0][-1]
             spk_embed = self.spk_info.get(speaker, 'luna')
-            audio_token = self.model.talker.omni_tts_binary_generation(output_text, vp_emb=spk_embed, thinker_reply_part=thinker_reply_part)
-            waveform = self.audio_detokenizer.token2wav(audio_token, spk_embed, save_path=output_audio_path)
+            audio_tokens = self.model.talker.omni_audio_generation(output_text, vp_emb=spk_embed, thinker_reply_part=thinker_reply_part)
+            waveform = self.audio_detokenizer.token2wav(audio_tokens, spk_embed, save_path=output_audio_path)
             return output_text, waveform
         return output_text
 
@@ -108,7 +110,8 @@ if __name__ == '__main__':
         device=device,
         generation_config={
             'output_hidden_states': True,
-            'return_dict_in_generate': True
+            'return_dict_in_generate': True,
+            'no_repeat_ngram_size': 10
         }
     )
 
@@ -123,7 +126,7 @@ if __name__ == '__main__':
         },
     ]
 
-    outputs = model.generate(messages, max_new_tokens=max_new_tokens)
+    outputs = model.generate(messages, max_new_tokens=max_new_tokens, use_whisper_encoder=True)
     print(outputs)
 
     # speech qa + tts

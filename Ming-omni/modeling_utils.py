@@ -14,6 +14,8 @@ import torch.distributed as dist
 from numpy import random
 from torch import nn
 from torch.nn import CrossEntropyLoss
+from whisper.model import AudioEncoder
+
 from transformers.activations import ACT2CLS, ClassInstantier
 
 try:
@@ -887,6 +889,9 @@ def encode_audio_segments(
     waveforms=None,
     waveforms_lengths=None,
     use_waveform=False,
+    audio_config=None,
+    whisper_config=None,
+    use_whisper_encoder=False
 ):
     """
     Apply audio encoder to input audio features in wrapped format.
@@ -903,8 +908,26 @@ def encode_audio_segments(
         assert wav_feats is not None and wav_feats_lengths is not None
         # Unwrap the features so the feature of each waveform is placed at an independent row.
         feat_segs_batch, feat_seg_lengths = unwrap_feats(wav_feats, wav_feats_lengths)
-        audio_feats_seg, audio_feat_seg_lengths = encoder(feat_segs_batch, feat_seg_lengths)[:2]
-    audio_feats_seg_proj = proj_layer(audio_feats_seg.transpose(-1, -2)).transpose(-1, -2)
+        if use_whisper_encoder:
+            assert isinstance(encoder, AudioEncoder)
+            assert whisper_config is not None
+            # for whisper encoder
+            # feat_segs_batch: [B, T, n_mels]
+            # feat_seg_lengths: [B]
+            audio_feats_seg = encoder(feat_segs_batch)
+            audio_feats_seg_proj = proj_layer(audio_feats_seg.transpose(-1, -2)).transpose(-1, -2)
+            feat_seg_lengths = feat_seg_lengths.to(feat_segs_batch.device)
+            # whisper encoder conv
+            audio_feat_seg_lengths = (feat_seg_lengths - 3 + 2 * 1) // 2 + 1
+            # project layer conv
+            audio_feat_seg_lengths = (audio_feat_seg_lengths - whisper_config.ds_kernel_size + 2 *
+                                      (whisper_config.ds_kernel_size//2)) // whisper_config.ds_stride + 1
+        else:
+            audio_feats_seg, audio_feat_seg_lengths = encoder(feat_segs_batch, feat_seg_lengths)[:2]
+            audio_feats_seg_proj = proj_layer(audio_feats_seg.transpose(-1, -2)).transpose(-1, -2)
+            # project layer conv
+            audio_feat_seg_lengths = (audio_feat_seg_lengths - audio_config.ds_kernel_size + 2 * (
+                    audio_config.ds_kernel_size // 2)) // audio_config.ds_stride + 1
 
     # Wrap the features so the 1st dim represents batch_size.
     input_lengths = waveforms_lengths if use_waveform else wav_feats_lengths
@@ -977,3 +1000,13 @@ def patch_continuous_features(
     embeddings = audio_feats_buffer * audio_feats_mask + input_embeddings * ~audio_feats_mask
     return embeddings
 
+def build_modality_mask(placeholder_loc_lens: torch.Tensor, shape: torch.Size):
+    mask = torch.zeros(shape, dtype=torch.bool)
+    for i in range(placeholder_loc_lens.shape[0]):
+        for j in range(placeholder_loc_lens.shape[1]):
+            start: int = int(placeholder_loc_lens[i, j, 0].item())
+            length: int = int(placeholder_loc_lens[i, j, 1].item())
+            if length <= 0:
+                break
+            mask[i, start:start + length] = True
+    return mask

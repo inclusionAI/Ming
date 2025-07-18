@@ -118,9 +118,11 @@ def generate_gen_image(
     ).to(model.device)
 
     if "image_gen_height" in inputs:
+        image_gen_height = inputs["image_gen_height"]
         del inputs["image_gen_height"]
     
     if "image_gen_width" in inputs:
+        image_gen_width = inputs["image_gen_width"]
         del inputs["image_gen_width"]
 
     for k in inputs.keys():

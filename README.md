@@ -252,6 +252,7 @@ We provide a LLaMA-Factory tools to facilitate the use of Ming-lite-omni.
     llamafactory-cli train ming_lora_sft.yaml
     ```
 
+4. You can change the `model_name_or_path` and `output_dir` to your own model path or output path. You can also uncomment the `eval` part to enable evaluation.
 For more details for llama-factory usage, please refer to the original [Github Repository](https://github.com/hiyouga/LLaMA-Factory).
 
 

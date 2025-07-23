@@ -246,10 +246,10 @@ We provide a LLaMA-Factory tools to facilitate the use of Ming-lite-omni.
     pip install .
     ```
 
-3. Now you can fine-tune Ming with llama-factory. 
+3. Now you can fine-tune Ming with llama-factory. You can change `ming_lora_sft.yaml` to `<your config yaml path>`.
     ```shell
     cd <your path to Ming>
-    llamafactory-cli train <your config yaml path>
+    llamafactory-cli train ming_lora_sft.yaml
     ```
 
 For more details for llama-factory usage, please refer to the original [Github Repository](https://github.com/hiyouga/LLaMA-Factory).

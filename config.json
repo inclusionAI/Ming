@@ -121,7 +121,7 @@
     "return_dict_in_generate": false,
     "rms_norm_eps": 1e-05,
     "rope_scaling": {
-      "type": "3D",
+      "type": "video_rope",
       "factor": null
     },
     "rope_theta": 600000,

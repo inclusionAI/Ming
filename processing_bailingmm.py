@@ -287,6 +287,7 @@ class BailingMMProcessor(ProcessorMixin):
                     text += content['text']
 
             if message["role"] == "ASSISTANT":
+                 text += "<|endoftext|>"
                  text += USER_PREFIX
             # text += "<|eot_id|>"
             

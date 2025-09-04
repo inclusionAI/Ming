@@ -185,6 +185,17 @@ Note: This download process will take several minutes to several hours, dependin
 
 
 
+```shell
+# huggingface
+cd ./path/to/local/model
+git lfs install
+git clone https://huggingface.co/inclusionAI/Ming-Lite-Omni
+
+# modelscope
+cd ./path/to/local/model
+pip install modelscope
+modelscope download --model inclusionAI/Ming-Lite-Omni --revision master --local_dir ./Ming-Lite-Omni  
+```
 
 ## Use Cases
 

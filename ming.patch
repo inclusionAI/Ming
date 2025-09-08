@@ -1,0 +1,273 @@
+diff --git a/src/llamafactory/chat/hf_engine.py b/src/llamafactory/chat/hf_engine.py
+index adaaaa87..bd16f78f 100644
+--- a/src/llamafactory/chat/hf_engine.py
++++ b/src/llamafactory/chat/hf_engine.py
+@@ -204,6 +204,9 @@ class HuggingfaceEngine(BaseEngine):
+                 gen_kwargs["audio_feature_lens"] = mm_inputs["audio_feature_lens"]
+ 
+             gen_kwargs.pop("image_sizes", None)
++        if getattr(model.config, "model_type", None) in ["bailingmm"]:
++            gen_kwargs["input_ids"] = inputs
++            del gen_kwargs["inputs"]
+ 
+         return gen_kwargs, prompt_length
+ 
+diff --git a/src/llamafactory/data/mm_plugin.py b/src/llamafactory/data/mm_plugin.py
+index 3ac9c307..12c66079 100644
+--- a/src/llamafactory/data/mm_plugin.py
++++ b/src/llamafactory/data/mm_plugin.py
+@@ -892,6 +892,187 @@ class LlavaNextVideoPlugin(BasePlugin):
+         return messages
+ 
+ 
++@dataclass
++class MingOmniPlugin(BasePlugin):
++    def _validate_input(
++        self,
++        processor: Optional["MMProcessor"],
++        images: list["ImageInput"],
++        videos: list["VideoInput"],
++        audios: list["AudioInput"],
++    ) -> None:
++        r"""Validate if this model accepts the input modalities."""
++        image_processor: BaseImageProcessor = getattr(processor, "image_processor", None)
++        video_processor: BaseImageProcessor = getattr(processor, "image_processor", None)
++        audio_processor = getattr(processor, "audio_processor", None)
++        if len(images) != 0 and self.image_token is None:
++            raise ValueError(
++                "This model does not support image input. Please check whether the correct `template` is used."
++            )
++
++        if len(videos) != 0 and self.video_token is None:
++            raise ValueError(
++                "This model does not support video input. Please check whether the correct `template` is used."
++            )
++
++        if len(audios) != 0 and self.audio_token is None:
++            raise ValueError(
++                "This model does not support audio input. Please check whether the correct `template` is used."
++            )
++
++        if self.image_token is not None and processor is None:
++            raise ValueError("Processor was not found, please check and update your model file.")
++
++        if self.image_token is not None and image_processor is None:
++            raise ValueError("Image processor was not found, please check and update your model file.")
++
++        if self.video_token is not None and video_processor is None:
++            raise ValueError("Video processor was not found, please check and update your model file.")
++
++        if self.audio_token is not None and audio_processor is None:
++            raise ValueError("Audio feature extractor was not found, please check and update your model file.")
++
++    @override
++    def _get_mm_inputs(
++        self,
++        images: list["ImageInput"],
++        videos: list["VideoInput"],
++        audios: list["AudioInput"],
++        processor: "MMProcessor",
++    ) -> dict[str, "torch.Tensor"]:
++        image_processor: BaseImageProcessor = getattr(processor, "image_processor", None)
++        audio_processor = getattr(processor, "audio_processor", None)
++        mm_inputs = {}
++        if len(images) != 0:
++            images = self._regularize_images(
++                images,
++                image_max_pixels=getattr(image_processor, "max_pixels", 2007040),
++                image_min_pixels=getattr(image_processor, "min_pixels", 78400),
++            )["images"]
++            mm_inputs.update(image_processor(images=images, videos=None, return_tensors="pt"))
++
++        if len(videos) != 0:
++            videos = self._regularize_videos(
++                videos,
++                image_max_pixels=getattr(image_processor, "max_pixels_video", 768 * 28 * 28),
++                image_min_pixels=getattr(image_processor, "min_pixels_video", 128 * 28 * 28),
++                video_fps=getattr(image_processor, "video_fps", 2.0),
++                video_maxlen=getattr(image_processor, "video_maxlen", 128),
++            )["videos"]
++            # Ming can only deal with even frames.
++            videos = [video[:-1] if len(video) % 2 else video for video in videos]
++            mm_inputs.update(image_processor(images=None, videos=videos, do_resize=True, return_tensors="pt"))
++
++        # if len(audios) != 0:
++        #     sampling_rate = 16000
++        #     audios = self._regularize_audios(audios, sampling_rate=sampling_rate)["audios"]
++        #     audios = [(torch.tensor(audio), sampling_rate)for audio in audios]
++        #     mm_inputs.update(
++        #         audio_processor(
++        #             audios,
++        #             padding="max_length",
++        #             use_whisper_encoder=False,
++        #             return_tensors="pt",
++        #         )
++        #     )
++
++        return mm_inputs
++
++    @override
++    def process_messages(
++        self,
++        messages: list[dict[str, str]],
++        images: list["ImageInput"],
++        videos: list["VideoInput"],
++        audios: list["AudioInput"],
++        processor: Optional["MMProcessor"],
++    ) -> list[dict[str, str]]:
++        self._validate_input(processor, images, videos, audios)
++        self._validate_messages(messages, images, videos, audios)
++        messages = deepcopy(messages)
++        image_processor: BaseImageProcessor = getattr(processor, "image_processor")
++        image_inputs, video_inputs, audio_inputs = {}, {}, {}
++
++        if len(images):
++            image_inputs = self._get_mm_inputs(images, [], [], processor)
++            image_grid_thw = image_inputs["image_grid_thw"]
++
++        if len(videos):
++            # assert len(videos) <= 1, "Video count must be at most 1!"
++            video_inputs = self._get_mm_inputs([], videos, [], processor)
++            video_grid_thw = video_inputs["video_grid_thw"]
++
++        # if len(audios):
++        #     audio_inputs = self._get_mm_inputs([], [], audios, processor)
++        #     audio_feats_lengths = audio_inputs["encoder_feats_lengths"]
++
++        if self.expand_mm_tokens and image_inputs:
++            idx = 0
++            num_query_token = torch.prod(image_grid_thw, dim=1) // 4
++            for index, message in enumerate(messages):
++                content = message["content"]
++
++                image_tags = re.findall(IMAGE_PLACEHOLDER, content)
++                text_chunks = content.split(IMAGE_PLACEHOLDER)
++                final_text = ""
++                for i in range(len(image_tags)):
++                    final_text = (
++                        final_text
++                        + text_chunks[i]
++                        + "<image>"
++                        + "<imagePatch>" * num_query_token[idx]
++                        + "</image>" + "\n"
++                    )
++                    idx += 1
++
++                final_text += text_chunks[-1]
++                messages[index]["content"] = final_text
++
++        if self.expand_mm_tokens and video_inputs:
++            idx = 0
++            num_query_token = torch.prod(video_grid_thw, dim=1) // 4
++            for index, message in enumerate(messages):
++                content = message["content"]
++
++                video_tags = re.findall(VIDEO_PLACEHOLDER, content)
++                text_chunks = content.split(VIDEO_PLACEHOLDER)
++                final_text = ""
++                for i in range(len(video_tags)):
++                    final_text = (
++                        final_text
++                        + text_chunks[i]
++                        + "<video>"
++                        + "<imagePatch>" * num_query_token[idx]
++                        + "</video>" + "\n"
++                    )
++                    idx += 1
++
++                final_text += text_chunks[-1]
++                messages[index]["content"] = final_text
++
++        if self.expand_mm_tokens and audio_inputs:
++            idx = 0
++            for index, message in enumerate(messages):
++                content = message["content"]
++
++                audio_tags = re.findall(AUDIO_PLACEHOLDER, content)
++                text_chunks = content.split(AUDIO_PLACEHOLDER)
++                final_text = ""
++                for i in range(len(audio_tags)):
++                    final_text = (
++                        final_text
++                        + text_chunks[i]
++                        + "<audio>"
++                        + "<audioPatch>" * int(audio_feats_lengths[idx].item())
++                        + "</audio>")
++                    idx += 1
++
++                final_text += text_chunks[-1]
++                messages[index]["content"] = final_text
++
++        return messages
++
++
+ @dataclass
+ class MiniCPMVPlugin(BasePlugin):
+     @override
+@@ -1724,6 +1905,7 @@ PLUGINS = {
+     "llava": LlavaPlugin,
+     "llava_next": LlavaNextPlugin,
+     "llava_next_video": LlavaNextVideoPlugin,
++    "ming_omni": MingOmniPlugin,
+     "minicpm_v": MiniCPMVPlugin,
+     "mllama": MllamaPlugin,
+     "paligemma": PaliGemmaPlugin,
+diff --git a/src/llamafactory/data/template.py b/src/llamafactory/data/template.py
+index ac19b30b..adc4bf71 100644
+--- a/src/llamafactory/data/template.py
++++ b/src/llamafactory/data/template.py
+@@ -1390,6 +1390,18 @@ register_template(
+ )
+ 
+ 
++# copied from bailing template
++register_template(
++    name="ming",
++    format_user=StringFormatter(slots=["<role>HUMAN</role>{{content}}<role>ASSISTANT</role>"]),
++    format_system=StringFormatter(slots=["<role>SYSTEM</role>{{content}}"]),
++    format_observation=StringFormatter(slots=["<role>OBSERVATION</role>{{content}}<role>ASSISTANT</role>"]),
++    stop_words=["<|endoftext|>"],
++    efficient_eos=True,
++    mm_plugin=get_mm_plugin(name="ming_omni", audio_token="<audio>", image_token="<image>", video_token="<video>"),
++)
++
++
+ # copied from chatml template
+ register_template(
+     name="minicpm_v",
+diff --git a/src/llamafactory/extras/constants.py b/src/llamafactory/extras/constants.py
+index f582d1f0..3294679f 100644
+--- a/src/llamafactory/extras/constants.py
++++ b/src/llamafactory/extras/constants.py
+@@ -1476,6 +1476,18 @@ register_model_group(
+ )
+ 
+ 
++register_model_group(
++    models={
++        "Ming-Lite-Omni": {
++            DownloadSource.DEFAULT: "inclusionAI/Ming-Lite-Omni",
++            DownloadSource.MODELSCOPE: "inclusionAI/Ming-Lite-Omni",
++        } ,
++    },
++    template="ming",
++    multimodal=True,
++)
++
++
+ register_model_group(
+     models={
+         "MiniCPM-2B-SFT-Chat": {
+diff --git a/src/llamafactory/model/patcher.py b/src/llamafactory/model/patcher.py
+index 4bf1d21d..da7ca9be 100644
+--- a/src/llamafactory/model/patcher.py
++++ b/src/llamafactory/model/patcher.py
+@@ -166,7 +166,7 @@ def patch_model(
+     ):
+         gen_config.do_sample = True
+ 
+-    if getattr(model.config, "model_type", None) not in ["minicpmv", "minicpmo"] and "GenerationMixin" not in str(
++    if getattr(model.config, "model_type", None) not in ["minicpmv", "minicpmo", "bailingmm"] and "GenerationMixin" not in str(
+         model.generate.__func__
+     ):
+         model.generate = MethodType(GenerationMixin.generate, model)

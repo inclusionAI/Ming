@@ -218,7 +218,7 @@ docker build -t ming:py310-cu121 docker/docker-py310-cu121
 ```
 At last, start the container with the current repo directory mounted:
 ```shell
-docker run -it --gpus all -v "$(pwd)":/workspace/Ming ming:py310-cu121 ming:py310-cu121 /bin/bash
+docker run -it --gpus all -v "$(pwd)":/workspace/Ming ming:py310-cu121 /bin/bash
 ```
 You can run the model with python interface. You may download the huggingface model in the repo directory first (`.../Ming/`) or mount the downloaded model path when starting the container.
 
@@ -342,6 +342,41 @@ pip install gradio_client
 python gradio_demo.py 
 ```
 
+## LLaMA-Factory Usage
+
+We provide a LLaMA-Factory tools to facilitate the use of Ming-lite-omni.
+
+1. First, make sure your environment is ready for Ming. Please clone the original code of this repository and download Ming-Lite-Omni-1.5 from [🤗 HuggingFace](https://huggingface.co/inclusionAI/Ming-Lite-Omni-1.5) or [🤖 ModelScope](https://www.modelscope.cn/models/inclusionAI/Ming-Lite-Omni-1.5) following the official installation guidance above.
+    ```shell
+    Ming
+    ├── am.mvn
+    ├── audio_detokenizer
+    ├── ...
+    ├── inclutionAI
+    │   ├── Ming-Lite-Omni-1.5
+    │   │   ├── config.json
+    │   │   ├── ...
+    ```
+
+2. Download the original code of `LLaMA-Factory==0.9.3`. Apply the patch for the compatibility of Ming and install LLaMA-factory with the official installation guide.
+    ```shell
+    git clone https://github.com/hiyouga/LLaMA-Factory.git
+    cd LLaMA-Factory
+    git checkout v0.9.3
+
+    cp <your path to Ming>/ming.patch .
+    git apply ming.patch
+    pip install .
+    ```
+
+3. Now you can fine-tune Ming with llama-factory. You can change `ming_lora_sft.yaml` to `<your config yaml path>`.
+    ```shell
+    cd <your path to Ming>
+    llamafactory-cli train ming_lora_sft.yaml
+    ```
+
+4. You can change the `model_name_or_path` and `output_dir` to your own model path or output path. You can also uncomment the `eval` part to enable evaluation.
+For more details for llama-factory usage, please refer to the original [Github Repository](https://github.com/hiyouga/LLaMA-Factory).
 
 ## Deployment- Using Ming-Omni SDK
 

@@ -2,7 +2,7 @@
   "add_bos_token": false,
   "add_eos_token": false,
   "added_tokens_decoder": {
-    "126080": {
+    "156891": {
       "content": "<|startoftext|>",
       "lstrip": false,
       "normalized": false,
@@ -10,7 +10,7 @@
       "single_word": false,
       "special": true
     },
-    "126081": {
+    "156892": {
       "content": "<|endoftext|>",
       "lstrip": false,
       "normalized": false,
@@ -18,7 +18,7 @@
       "single_word": false,
       "special": true
     },
-    "126082": {
+    "156893": {
       "content": "[CLS]",
       "lstrip": false,
       "normalized": false,
@@ -26,7 +26,7 @@
       "single_word": false,
       "special": true
     },
-    "126083": {
+    "156894": {
       "content": "[gMASK]",
       "lstrip": false,
       "normalized": false,
@@ -34,47 +34,47 @@
       "single_word": false,
       "special": true
     },
-    "126084": {
-      "content": "<|reserved_token_0|>",
+    "156895": {
+      "content": "<|role_end|>",
       "lstrip": false,
       "normalized": false,
       "rstrip": false,
       "single_word": false,
       "special": true
     },
-    "126085": {
-      "content": "<|reserved_token_1|>",
+    "156896": {
+      "content": "<tool_call>",
       "lstrip": false,
       "normalized": false,
       "rstrip": false,
       "single_word": false,
       "special": true
     },
-    "126086": {
-      "content": "<|reserved_token_2|>",
+    "156897": {
+      "content": "</tool_call>",
       "lstrip": false,
       "normalized": false,
       "rstrip": false,
       "single_word": false,
       "special": true
     },
-    "126087": {
-      "content": "<|reserved_token_3|>",
+    "156898": {
+      "content": "<tool_response>",
       "lstrip": false,
       "normalized": false,
       "rstrip": false,
       "single_word": false,
       "special": true
     },
-    "126088": {
-      "content": "<|reserved_token_4|>",
+    "156899": {
+      "content": "</tool_response>",
       "lstrip": false,
       "normalized": false,
       "rstrip": false,
       "single_word": false,
       "special": true
     },
-    "126089": {
+    "156900": {
       "content": "<|reserved_token_5|>",
       "lstrip": false,
       "normalized": false,
@@ -82,7 +82,7 @@
       "single_word": false,
       "special": true
     },
-    "126090": {
+    "156901": {
       "content": "<|reserved_token_6|>",
       "lstrip": false,
       "normalized": false,
@@ -90,7 +90,7 @@
       "single_word": false,
       "special": true
     },
-    "126091": {
+    "156902": {
       "content": "<|reserved_token_7|>",
       "lstrip": false,
       "normalized": false,
@@ -98,7 +98,7 @@
       "single_word": false,
       "special": true
     },
-    "126092": {
+    "156903": {
       "content": "<|reserved_token_8|>",
       "lstrip": false,
       "normalized": false,
@@ -106,7 +106,7 @@
       "single_word": false,
       "special": true
     },
-    "126093": {
+    "156904": {
       "content": "<|reserved_token_9|>",
       "lstrip": false,
       "normalized": false,
@@ -114,7 +114,7 @@
       "single_word": false,
       "special": true
     },
-    "126094": {
+    "156905": {
       "content": "<|reserved_token_10|>",
       "lstrip": false,
       "normalized": false,
@@ -122,7 +122,7 @@
       "single_word": false,
       "special": true
     },
-    "126095": {
+    "156906": {
       "content": "<|reserved_token_11|>",
       "lstrip": false,
       "normalized": false,
@@ -130,7 +130,7 @@
       "single_word": false,
       "special": true
     },
-    "126096": {
+    "156907": {
       "content": "<|reserved_token_12|>",
       "lstrip": false,
       "normalized": false,
@@ -138,7 +138,7 @@
       "single_word": false,
       "special": true
     },
-    "126097": {
+    "156908": {
       "content": "<|reserved_token_13|>",
       "lstrip": false,
       "normalized": false,
@@ -146,7 +146,7 @@
       "single_word": false,
       "special": true
     },
-    "126098": {
+    "156909": {
       "content": "<|reserved_token_14|>",
       "lstrip": false,
       "normalized": false,
@@ -154,7 +154,7 @@
       "single_word": false,
       "special": true
     },
-    "126099": {
+    "156910": {
       "content": "<|reserved_token_15|>",
       "lstrip": false,
       "normalized": false,
@@ -162,7 +162,7 @@
       "single_word": false,
       "special": true
     },
-    "126100": {
+    "156911": {
       "content": "<|reserved_token_16|>",
       "lstrip": false,
       "normalized": false,
@@ -170,7 +170,7 @@
       "single_word": false,
       "special": true
     },
-    "126101": {
+    "156912": {
       "content": "<|reserved_token_17|>",
       "lstrip": false,
       "normalized": false,
@@ -178,7 +178,7 @@
       "single_word": false,
       "special": true
     },
-    "126102": {
+    "156913": {
       "content": "<|reserved_token_18|>",
       "lstrip": false,
       "normalized": false,
@@ -186,7 +186,7 @@
       "single_word": false,
       "special": true
     },
-    "126103": {
+    "156914": {
       "content": "<|reserved_token_19|>",
       "lstrip": false,
       "normalized": false,
@@ -194,7 +194,7 @@
       "single_word": false,
       "special": true
     },
-    "126104": {
+    "156915": {
       "content": "<|reserved_token_20|>",
       "lstrip": false,
       "normalized": false,
@@ -202,7 +202,7 @@
       "single_word": false,
       "special": true
     },
-    "126105": {
+    "156916": {
       "content": "<|reserved_token_21|>",
       "lstrip": false,
       "normalized": false,
@@ -210,7 +210,7 @@
       "single_word": false,
       "special": true
     },
-    "126106": {
+    "156917": {
       "content": "<|reserved_token_22|>",
       "lstrip": false,
       "normalized": false,
@@ -218,7 +218,7 @@
       "single_word": false,
       "special": true
     },
-    "126107": {
+    "156918": {
       "content": "<|reserved_token_23|>",
       "lstrip": false,
       "normalized": false,
@@ -226,7 +226,7 @@
       "single_word": false,
       "special": true
     },
-    "126108": {
+    "156919": {
       "content": "<|reserved_token_24|>",
       "lstrip": false,
       "normalized": false,
@@ -234,7 +234,7 @@
       "single_word": false,
       "special": true
     },
-    "126109": {
+    "156920": {
       "content": "<|reserved_token_25|>",
       "lstrip": false,
       "normalized": false,
@@ -242,7 +242,7 @@
       "single_word": false,
       "special": true
     },
-    "126110": {
+    "156921": {
       "content": "<|reserved_token_26|>",
       "lstrip": false,
       "normalized": false,
@@ -250,7 +250,7 @@
       "single_word": false,
       "special": true
     },
-    "126111": {
+    "156922": {
       "content": "<|reserved_token_27|>",
       "lstrip": false,
       "normalized": false,
@@ -258,7 +258,7 @@
       "single_word": false,
       "special": true
     },
-    "126112": {
+    "156923": {
       "content": "<|reserved_token_28|>",
       "lstrip": false,
       "normalized": false,
@@ -266,7 +266,7 @@
       "single_word": false,
       "special": true
     },
-    "126113": {
+    "156924": {
       "content": "<|reserved_token_29|>",
       "lstrip": false,
       "normalized": false,
@@ -274,7 +274,7 @@
       "single_word": false,
       "special": true
     },
-    "126114": {
+    "156925": {
       "content": "<|reserved_token_30|>",
       "lstrip": false,
       "normalized": false,
@@ -282,7 +282,7 @@
       "single_word": false,
       "special": true
     },
-    "126115": {
+    "156926": {
       "content": "<|reserved_token_31|>",
       "lstrip": false,
       "normalized": false,
@@ -290,7 +290,7 @@
       "single_word": false,
       "special": true
     },
-    "126116": {
+    "156927": {
       "content": "<|reserved_token_32|>",
       "lstrip": false,
       "normalized": false,
@@ -298,7 +298,7 @@
       "single_word": false,
       "special": true
     },
-    "126117": {
+    "156928": {
       "content": "<|reserved_token_33|>",
       "lstrip": false,
       "normalized": false,
@@ -306,7 +306,7 @@
       "single_word": false,
       "special": true
     },
-    "126118": {
+    "156929": {
       "content": "<|reserved_token_34|>",
       "lstrip": false,
       "normalized": false,
@@ -314,7 +314,7 @@
       "single_word": false,
       "special": true
     },
-    "126119": {
+    "156930": {
       "content": "<|reserved_token_35|>",
       "lstrip": false,
       "normalized": false,
@@ -322,7 +322,7 @@
       "single_word": false,
       "special": true
     },
-    "126120": {
+    "156931": {
       "content": "<|reserved_token_36|>",
       "lstrip": false,
       "normalized": false,
@@ -330,7 +330,7 @@
       "single_word": false,
       "special": true
     },
-    "126121": {
+    "156932": {
       "content": "<|reserved_token_37|>",
       "lstrip": false,
       "normalized": false,
@@ -338,7 +338,7 @@
       "single_word": false,
       "special": true
     },
-    "126122": {
+    "156933": {
       "content": "<|reserved_token_38|>",
       "lstrip": false,
       "normalized": false,
@@ -346,7 +346,7 @@
       "single_word": false,
       "special": true
     },
-    "126123": {
+    "156934": {
       "content": "<|reserved_token_39|>",
       "lstrip": false,
       "normalized": false,
@@ -354,7 +354,7 @@
       "single_word": false,
       "special": true
     },
-    "126124": {
+    "156935": {
       "content": "<|reserved_token_40|>",
       "lstrip": false,
       "normalized": false,
@@ -362,7 +362,7 @@
       "single_word": false,
       "special": true
     },
-    "126125": {
+    "156936": {
       "content": "<|reserved_token_41|>",
       "lstrip": false,
       "normalized": false,
@@ -370,7 +370,7 @@
       "single_word": false,
       "special": true
     },
-    "126126": {
+    "156937": {
       "content": "<|reserved_token_42|>",
       "lstrip": false,
       "normalized": false,
@@ -378,7 +378,7 @@
       "single_word": false,
       "special": true
     },
-    "126127": {
+    "156938": {
       "content": "<|reserved_token_43|>",
       "lstrip": false,
       "normalized": false,
@@ -386,7 +386,7 @@
       "single_word": false,
       "special": true
     },
-    "126128": {
+    "156939": {
       "content": "<|reserved_token_44|>",
       "lstrip": false,
       "normalized": false,
@@ -394,7 +394,7 @@
       "single_word": false,
       "special": true
     },
-    "126129": {
+    "156940": {
       "content": "<|reserved_token_45|>",
       "lstrip": false,
       "normalized": false,
@@ -402,7 +402,7 @@
       "single_word": false,
       "special": true
     },
-    "126130": {
+    "156941": {
       "content": "<|reserved_token_46|>",
       "lstrip": false,
       "normalized": false,
@@ -410,7 +410,7 @@
       "single_word": false,
       "special": true
     },
-    "126131": {
+    "156942": {
       "content": "<|reserved_token_47|>",
       "lstrip": false,
       "normalized": false,
@@ -418,7 +418,7 @@
       "single_word": false,
       "special": true
     },
-    "126132": {
+    "156943": {
       "content": "<|reserved_token_48|>",
       "lstrip": false,
       "normalized": false,
@@ -426,7 +426,7 @@
       "single_word": false,
       "special": true
     },
-    "126133": {
+    "156944": {
       "content": "<|reserved_token_49|>",
       "lstrip": false,
       "normalized": false,
@@ -434,7 +434,7 @@
       "single_word": false,
       "special": true
     },
-    "126134": {
+    "156945": {
       "content": "<|reserved_token_50|>",
       "lstrip": false,
       "normalized": false,
@@ -442,7 +442,7 @@
       "single_word": false,
       "special": true
     },
-    "126135": {
+    "156946": {
       "content": "<|reserved_token_51|>",
       "lstrip": false,
       "normalized": false,
@@ -450,7 +450,7 @@
       "single_word": false,
       "special": true
     },
-    "126136": {
+    "156947": {
       "content": "<|reserved_token_52|>",
       "lstrip": false,
       "normalized": false,
@@ -458,7 +458,7 @@
       "single_word": false,
       "special": true
     },
-    "126137": {
+    "156948": {
       "content": "<|reserved_token_53|>",
       "lstrip": false,
       "normalized": false,
@@ -466,7 +466,7 @@
       "single_word": false,
       "special": true
     },
-    "126138": {
+    "156949": {
       "content": "<|reserved_token_54|>",
       "lstrip": false,
       "normalized": false,
@@ -474,7 +474,7 @@
       "single_word": false,
       "special": true
     },
-    "126139": {
+    "156950": {
       "content": "<|reserved_token_55|>",
       "lstrip": false,
       "normalized": false,
@@ -482,7 +482,7 @@
       "single_word": false,
       "special": true
     },
-    "126140": {
+    "156951": {
       "content": "<|reserved_token_56|>",
       "lstrip": false,
       "normalized": false,
@@ -490,7 +490,7 @@
       "single_word": false,
       "special": true
     },
-    "126141": {
+    "156952": {
       "content": "<|reserved_token_57|>",
       "lstrip": false,
       "normalized": false,
@@ -498,7 +498,7 @@
       "single_word": false,
       "special": true
     },
-    "126142": {
+    "156953": {
       "content": "<|reserved_token_58|>",
       "lstrip": false,
       "normalized": false,
@@ -506,7 +506,7 @@
       "single_word": false,
       "special": true
     },
-    "126143": {
+    "156954": {
       "content": "<|reserved_token_59|>",
       "lstrip": false,
       "normalized": false,
@@ -514,7 +514,7 @@
       "single_word": false,
       "special": true
     },
-    "126144": {
+    "156955": {
       "content": "<|reserved_token_60|>",
       "lstrip": false,
       "normalized": false,
@@ -522,7 +522,7 @@
       "single_word": false,
       "special": true
     },
-    "126145": {
+    "156956": {
       "content": "<|reserved_token_61|>",
       "lstrip": false,
       "normalized": false,
@@ -530,7 +530,7 @@
       "single_word": false,
       "special": true
     },
-    "126146": {
+    "156957": {
       "content": "<|reserved_token_62|>",
       "lstrip": false,
       "normalized": false,
@@ -538,7 +538,7 @@
       "single_word": false,
       "special": true
     },
-    "126147": {
+    "156958": {
       "content": "<|reserved_token_63|>",
       "lstrip": false,
       "normalized": false,
@@ -546,7 +546,7 @@
       "single_word": false,
       "special": true
     },
-    "126148": {
+    "156959": {
       "content": "<|reserved_token_64|>",
       "lstrip": false,
       "normalized": false,
@@ -554,7 +554,7 @@
       "single_word": false,
       "special": true
     },
-    "126149": {
+    "156960": {
       "content": "<|reserved_token_65|>",
       "lstrip": false,
       "normalized": false,
@@ -562,7 +562,7 @@
       "single_word": false,
       "special": true
     },
-    "126150": {
+    "156961": {
       "content": "<|reserved_token_66|>",
       "lstrip": false,
       "normalized": false,
@@ -570,7 +570,7 @@
       "single_word": false,
       "special": true
     },
-    "126151": {
+    "156962": {
       "content": "<|reserved_token_67|>",
       "lstrip": false,
       "normalized": false,
@@ -578,7 +578,7 @@
       "single_word": false,
       "special": true
     },
-    "126152": {
+    "156963": {
       "content": "<|reserved_token_68|>",
       "lstrip": false,
       "normalized": false,
@@ -586,7 +586,7 @@
       "single_word": false,
       "special": true
     },
-    "126153": {
+    "156964": {
       "content": "<|reserved_token_69|>",
       "lstrip": false,
       "normalized": false,
@@ -594,7 +594,7 @@
       "single_word": false,
       "special": true
     },
-    "126154": {
+    "156965": {
       "content": "<|reserved_token_70|>",
       "lstrip": false,
       "normalized": false,
@@ -602,7 +602,7 @@
       "single_word": false,
       "special": true
     },
-    "126155": {
+    "156966": {
       "content": "<|reserved_token_71|>",
       "lstrip": false,
       "normalized": false,
@@ -610,7 +610,7 @@
       "single_word": false,
       "special": true
     },
-    "126156": {
+    "156967": {
       "content": "<|reserved_token_72|>",
       "lstrip": false,
       "normalized": false,
@@ -618,7 +618,7 @@
       "single_word": false,
       "special": true
     },
-    "126157": {
+    "156968": {
       "content": "<|reserved_token_73|>",
       "lstrip": false,
       "normalized": false,
@@ -626,7 +626,7 @@
       "single_word": false,
       "special": true
     },
-    "126158": {
+    "156969": {
       "content": "<|reserved_token_74|>",
       "lstrip": false,
       "normalized": false,
@@ -634,7 +634,7 @@
       "single_word": false,
       "special": true
     },
-    "126159": {
+    "156970": {
       "content": "<|reserved_token_75|>",
       "lstrip": false,
       "normalized": false,
@@ -642,7 +642,7 @@
       "single_word": false,
       "special": true
     },
-    "126160": {
+    "156971": {
       "content": "<|reserved_token_76|>",
       "lstrip": false,
       "normalized": false,
@@ -650,7 +650,7 @@
       "single_word": false,
       "special": true
     },
-    "126161": {
+    "156972": {
       "content": "<|reserved_token_77|>",
       "lstrip": false,
       "normalized": false,
@@ -658,7 +658,7 @@
       "single_word": false,
       "special": true
     },
-    "126162": {
+    "156973": {
       "content": "<|reserved_token_78|>",
       "lstrip": false,
       "normalized": false,
@@ -666,7 +666,7 @@
       "single_word": false,
       "special": true
     },
-    "126163": {
+    "156974": {
       "content": "<|reserved_token_79|>",
       "lstrip": false,
       "normalized": false,
@@ -674,7 +674,7 @@
       "single_word": false,
       "special": true
     },
-    "126164": {
+    "156975": {
       "content": "<|reserved_token_80|>",
       "lstrip": false,
       "normalized": false,
@@ -682,7 +682,7 @@
       "single_word": false,
       "special": true
     },
-    "126165": {
+    "156976": {
       "content": "<|reserved_token_81|>",
       "lstrip": false,
       "normalized": false,
@@ -690,7 +690,7 @@
       "single_word": false,
       "special": true
     },
-    "126166": {
+    "156977": {
       "content": "<|reserved_token_82|>",
       "lstrip": false,
       "normalized": false,
@@ -698,7 +698,7 @@
       "single_word": false,
       "special": true
     },
-    "126167": {
+    "156978": {
       "content": "<|reserved_token_83|>",
       "lstrip": false,
       "normalized": false,
@@ -706,7 +706,7 @@
       "single_word": false,
       "special": true
     },
-    "126168": {
+    "156979": {
       "content": "<|reserved_token_84|>",
       "lstrip": false,
       "normalized": false,
@@ -714,7 +714,7 @@
       "single_word": false,
       "special": true
     },
-    "126169": {
+    "156980": {
       "content": "<|reserved_token_85|>",
       "lstrip": false,
       "normalized": false,
@@ -722,7 +722,7 @@
       "single_word": false,
       "special": true
     },
-    "126170": {
+    "156981": {
       "content": "<|reserved_token_86|>",
       "lstrip": false,
       "normalized": false,
@@ -730,7 +730,7 @@
       "single_word": false,
       "special": true
     },
-    "126171": {
+    "156982": {
       "content": "<|reserved_token_87|>",
       "lstrip": false,
       "normalized": false,
@@ -738,7 +738,7 @@
       "single_word": false,
       "special": true
     },
-    "126172": {
+    "156983": {
       "content": "<|reserved_token_88|>",
       "lstrip": false,
       "normalized": false,
@@ -746,7 +746,7 @@
       "single_word": false,
       "special": true
     },
-    "126173": {
+    "156984": {
       "content": "<|reserved_token_89|>",
       "lstrip": false,
       "normalized": false,
@@ -754,7 +754,7 @@
       "single_word": false,
       "special": true
     },
-    "126174": {
+    "156985": {
       "content": "<|reserved_token_90|>",
       "lstrip": false,
       "normalized": false,
@@ -762,7 +762,7 @@
       "single_word": false,
       "special": true
     },
-    "126175": {
+    "156986": {
       "content": "<|reserved_token_91|>",
       "lstrip": false,
       "normalized": false,
@@ -770,7 +770,7 @@
       "single_word": false,
       "special": true
     },
-    "126176": {
+    "156987": {
       "content": "<|reserved_token_92|>",
       "lstrip": false,
       "normalized": false,
@@ -778,7 +778,7 @@
       "single_word": false,
       "special": true
     },
-    "126177": {
+    "156988": {
       "content": "<|reserved_token_93|>",
       "lstrip": false,
       "normalized": false,
@@ -786,7 +786,7 @@
       "single_word": false,
       "special": true
     },
-    "126178": {
+    "156989": {
       "content": "<|reserved_token_94|>",
       "lstrip": false,
       "normalized": false,
@@ -794,7 +794,7 @@
       "single_word": false,
       "special": true
     },
-    "126179": {
+    "156990": {
       "content": "<|reserved_token_95|>",
       "lstrip": false,
       "normalized": false,
@@ -802,7 +802,7 @@
       "single_word": false,
       "special": true
     },
-    "126180": {
+    "156991": {
       "content": "<|reserved_token_96|>",
       "lstrip": false,
       "normalized": false,
@@ -810,7 +810,7 @@
       "single_word": false,
       "special": true
     },
-    "126181": {
+    "156992": {
       "content": "<|reserved_token_97|>",
       "lstrip": false,
       "normalized": false,
@@ -818,7 +818,7 @@
       "single_word": false,
       "special": true
     },
-    "126182": {
+    "156993": {
       "content": "<|reserved_token_98|>",
       "lstrip": false,
       "normalized": false,
@@ -826,7 +826,7 @@
       "single_word": false,
       "special": true
     },
-    "126183": {
+    "156994": {
       "content": "<|reserved_token_99|>",
       "lstrip": false,
       "normalized": false,
@@ -834,7 +834,7 @@
       "single_word": false,
       "special": true
     },
-    "126184": {
+    "156995": {
       "content": "<|reserved_token_100|>",
       "lstrip": false,
       "normalized": false,
@@ -842,7 +842,7 @@
       "single_word": false,
       "special": true
     },
-    "126185": {
+    "156996": {
       "content": "<|reserved_token_101|>",
       "lstrip": false,
       "normalized": false,
@@ -850,7 +850,7 @@
       "single_word": false,
       "special": true
     },
-    "126186": {
+    "156997": {
       "content": "<|reserved_token_102|>",
       "lstrip": false,
       "normalized": false,
@@ -858,7 +858,7 @@
       "single_word": false,
       "special": true
     },
-    "126187": {
+    "156998": {
       "content": "<|reserved_token_103|>",
       "lstrip": false,
       "normalized": false,
@@ -866,7 +866,7 @@
       "single_word": false,
       "special": true
     },
-    "126188": {
+    "156999": {
       "content": "<|reserved_token_104|>",
       "lstrip": false,
       "normalized": false,
@@ -874,7 +874,7 @@
       "single_word": false,
       "special": true
     },
-    "126189": {
+    "157000": {
       "content": "<|reserved_token_105|>",
       "lstrip": false,
       "normalized": false,
@@ -882,7 +882,7 @@
       "single_word": false,
       "special": true
     },
-    "126190": {
+    "157001": {
       "content": "<|reserved_token_106|>",
       "lstrip": false,
       "normalized": false,
@@ -890,7 +890,7 @@
       "single_word": false,
       "special": true
     },
-    "126191": {
+    "157002": {
       "content": "<|reserved_token_107|>",
       "lstrip": false,
       "normalized": false,
@@ -898,7 +898,7 @@
       "single_word": false,
       "special": true
     },
-    "126192": {
+    "157003": {
       "content": "<|reserved_token_108|>",
       "lstrip": false,
       "normalized": false,
@@ -906,7 +906,7 @@
       "single_word": false,
       "special": true
     },
-    "126193": {
+    "157004": {
       "content": "<|reserved_token_109|>",
       "lstrip": false,
       "normalized": false,
@@ -914,7 +914,7 @@
       "single_word": false,
       "special": true
     },
-    "126194": {
+    "157005": {
       "content": "<|reserved_token_110|>",
       "lstrip": false,
       "normalized": false,
@@ -922,7 +922,7 @@
       "single_word": false,
       "special": true
     },
-    "126195": {
+    "157006": {
       "content": "<|reserved_token_111|>",
       "lstrip": false,
       "normalized": false,
@@ -930,7 +930,7 @@
       "single_word": false,
       "special": true
     },
-    "126196": {
+    "157007": {
       "content": "<|reserved_token_112|>",
       "lstrip": false,
       "normalized": false,
@@ -938,7 +938,7 @@
       "single_word": false,
       "special": true
     },
-    "126197": {
+    "157008": {
       "content": "<|reserved_token_113|>",
       "lstrip": false,
       "normalized": false,
@@ -946,7 +946,7 @@
       "single_word": false,
       "special": true
     },
-    "126198": {
+    "157009": {
       "content": "<|reserved_token_114|>",
       "lstrip": false,
       "normalized": false,
@@ -954,7 +954,7 @@
       "single_word": false,
       "special": true
     },
-    "126199": {
+    "157010": {
       "content": "<|reserved_token_115|>",
       "lstrip": false,
       "normalized": false,
@@ -962,7 +962,7 @@
       "single_word": false,
       "special": true
     },
-    "126200": {
+    "157011": {
       "content": "<|reserved_token_116|>",
       "lstrip": false,
       "normalized": false,
@@ -970,7 +970,7 @@
       "single_word": false,
       "special": true
     },
-    "126201": {
+    "157012": {
       "content": "<|reserved_token_117|>",
       "lstrip": false,
       "normalized": false,
@@ -978,7 +978,7 @@
       "single_word": false,
       "special": true
     },
-    "126202": {
+    "157013": {
       "content": "<|reserved_token_118|>",
       "lstrip": false,
       "normalized": false,
@@ -986,7 +986,7 @@
       "single_word": false,
       "special": true
     },
-    "126203": {
+    "157014": {
       "content": "<|reserved_token_119|>",
       "lstrip": false,
       "normalized": false,
@@ -994,7 +994,7 @@
       "single_word": false,
       "special": true
     },
-    "126204": {
+    "157015": {
       "content": "<|reserved_token_120|>",
       "lstrip": false,
       "normalized": false,
@@ -1002,7 +1002,7 @@
       "single_word": false,
       "special": true
     },
-    "126205": {
+    "157016": {
       "content": "<|reserved_token_121|>",
       "lstrip": false,
       "normalized": false,
@@ -1010,7 +1010,7 @@
       "single_word": false,
       "special": true
     },
-    "126206": {
+    "157017": {
       "content": "<|reserved_token_122|>",
       "lstrip": false,
       "normalized": false,
@@ -1018,7 +1018,7 @@
       "single_word": false,
       "special": true
     },
-    "126207": {
+    "157018": {
       "content": "<|reserved_token_123|>",
       "lstrip": false,
       "normalized": false,
@@ -1026,7 +1026,7 @@
       "single_word": false,
       "special": true
     },
-    "126208": {
+    "157019": {
       "content": "<|reserved_token_124|>",
       "lstrip": false,
       "normalized": false,
@@ -1034,7 +1034,7 @@
       "single_word": false,
       "special": true
     },
-    "126209": {
+    "157020": {
       "content": "<|reserved_token_125|>",
       "lstrip": false,
       "normalized": false,
@@ -1042,7 +1042,7 @@
       "single_word": false,
       "special": true
     },
-    "126210": {
+    "157021": {
       "content": "<|reserved_token_126|>",
       "lstrip": false,
       "normalized": false,
@@ -1050,7 +1050,7 @@
       "single_word": false,
       "special": true
     },
-    "126211": {
+    "157022": {
       "content": "<|reserved_token_127|>",
       "lstrip": false,
       "normalized": false,
@@ -1058,7 +1058,7 @@
       "single_word": false,
       "special": true
     },
-    "126212": {
+    "157023": {
       "content": "<|reserved_token_128|>",
       "lstrip": false,
       "normalized": false,
@@ -1066,7 +1066,7 @@
       "single_word": false,
       "special": true
     },
-    "126213": {
+    "157024": {
       "content": "<|reserved_token_129|>",
       "lstrip": false,
       "normalized": false,
@@ -1074,7 +1074,7 @@
       "single_word": false,
       "special": true
     },
-    "126214": {
+    "157025": {
       "content": "<|reserved_token_130|>",
       "lstrip": false,
       "normalized": false,
@@ -1082,7 +1082,7 @@
       "single_word": false,
       "special": true
     },
-    "126215": {
+    "157026": {
       "content": "<|reserved_token_131|>",
       "lstrip": false,
       "normalized": false,
@@ -1090,7 +1090,7 @@
       "single_word": false,
       "special": true
     },
-    "126216": {
+    "157027": {
       "content": "<|reserved_token_132|>",
       "lstrip": false,
       "normalized": false,
@@ -1098,7 +1098,7 @@
       "single_word": false,
       "special": true
     },
-    "126217": {
+    "157028": {
       "content": "<|reserved_token_133|>",
       "lstrip": false,
       "normalized": false,
@@ -1106,7 +1106,7 @@
       "single_word": false,
       "special": true
     },
-    "126218": {
+    "157029": {
       "content": "<|reserved_token_134|>",
       "lstrip": false,
       "normalized": false,
@@ -1114,7 +1114,7 @@
       "single_word": false,
       "special": true
     },
-    "126219": {
+    "157030": {
       "content": "<|reserved_token_135|>",
       "lstrip": false,
       "normalized": false,
@@ -1122,7 +1122,7 @@
       "single_word": false,
       "special": true
     },
-    "126220": {
+    "157031": {
       "content": "<|reserved_token_136|>",
       "lstrip": false,
       "normalized": false,
@@ -1130,7 +1130,7 @@
       "single_word": false,
       "special": true
     },
-    "126221": {
+    "157032": {
       "content": "<|reserved_token_137|>",
       "lstrip": false,
       "normalized": false,
@@ -1138,7 +1138,7 @@
       "single_word": false,
       "special": true
     },
-    "126222": {
+    "157033": {
       "content": "<|reserved_token_138|>",
       "lstrip": false,
       "normalized": false,
@@ -1146,7 +1146,7 @@
       "single_word": false,
       "special": true
     },
-    "126223": {
+    "157034": {
       "content": "<|reserved_token_139|>",
       "lstrip": false,
       "normalized": false,
@@ -1154,7 +1154,7 @@
       "single_word": false,
       "special": true
     },
-    "126224": {
+    "157035": {
       "content": "<|reserved_token_140|>",
       "lstrip": false,
       "normalized": false,
@@ -1162,7 +1162,7 @@
       "single_word": false,
       "special": true
     },
-    "126225": {
+    "157036": {
       "content": "<|reserved_token_141|>",
       "lstrip": false,
       "normalized": false,
@@ -1170,7 +1170,7 @@
       "single_word": false,
       "special": true
     },
-    "126226": {
+    "157037": {
       "content": "<|reserved_token_142|>",
       "lstrip": false,
       "normalized": false,
@@ -1178,7 +1178,7 @@
       "single_word": false,
       "special": true
     },
-    "126227": {
+    "157038": {
       "content": "<|reserved_token_143|>",
       "lstrip": false,
       "normalized": false,
@@ -1186,7 +1186,7 @@
       "single_word": false,
       "special": true
     },
-    "126228": {
+    "157039": {
       "content": "<|reserved_token_144|>",
       "lstrip": false,
       "normalized": false,
@@ -1194,7 +1194,7 @@
       "single_word": false,
       "special": true
     },
-    "126229": {
+    "157040": {
       "content": "<|reserved_token_145|>",
       "lstrip": false,
       "normalized": false,
@@ -1202,7 +1202,7 @@
       "single_word": false,
       "special": true
     },
-    "126230": {
+    "157041": {
       "content": "<|reserved_token_146|>",
       "lstrip": false,
       "normalized": false,
@@ -1210,7 +1210,7 @@
       "single_word": false,
       "special": true
     },
-    "126231": {
+    "157042": {
       "content": "<|reserved_token_147|>",
       "lstrip": false,
       "normalized": false,
@@ -1218,7 +1218,7 @@
       "single_word": false,
       "special": true
     },
-    "126232": {
+    "157043": {
       "content": "<|reserved_token_148|>",
       "lstrip": false,
       "normalized": false,
@@ -1226,7 +1226,7 @@
       "single_word": false,
       "special": true
     },
-    "126233": {
+    "157044": {
       "content": "<|reserved_token_149|>",
       "lstrip": false,
       "normalized": false,
@@ -1234,7 +1234,7 @@
       "single_word": false,
       "special": true
     },
-    "126234": {
+    "157045": {
       "content": "<|reserved_token_150|>",
       "lstrip": false,
       "normalized": false,
@@ -1242,7 +1242,7 @@
       "single_word": false,
       "special": true
     },
-    "126235": {
+    "157046": {
       "content": "<|reserved_token_151|>",
       "lstrip": false,
       "normalized": false,
@@ -1250,7 +1250,7 @@
       "single_word": false,
       "special": true
     },
-    "126236": {
+    "157047": {
       "content": "<|reserved_token_152|>",
       "lstrip": false,
       "normalized": false,
@@ -1258,7 +1258,7 @@
       "single_word": false,
       "special": true
     },
-    "126237": {
+    "157048": {
       "content": "<|reserved_token_153|>",
       "lstrip": false,
       "normalized": false,
@@ -1266,7 +1266,7 @@
       "single_word": false,
       "special": true
     },
-    "126238": {
+    "157049": {
       "content": "<|reserved_token_154|>",
       "lstrip": false,
       "normalized": false,
@@ -1274,7 +1274,7 @@
       "single_word": false,
       "special": true
     },
-    "126239": {
+    "157050": {
       "content": "<|reserved_token_155|>",
       "lstrip": false,
       "normalized": false,
@@ -1282,7 +1282,7 @@
       "single_word": false,
       "special": true
     },
-    "126240": {
+    "157051": {
       "content": "<|reserved_token_156|>",
       "lstrip": false,
       "normalized": false,
@@ -1290,7 +1290,7 @@
       "single_word": false,
       "special": true
     },
-    "126241": {
+    "157052": {
       "content": "<|reserved_token_157|>",
       "lstrip": false,
       "normalized": false,
@@ -1298,7 +1298,7 @@
       "single_word": false,
       "special": true
     },
-    "126242": {
+    "157053": {
       "content": "<|reserved_token_158|>",
       "lstrip": false,
       "normalized": false,
@@ -1306,7 +1306,7 @@
       "single_word": false,
       "special": true
     },
-    "126243": {
+    "157054": {
       "content": "<|reserved_token_159|>",
       "lstrip": false,
       "normalized": false,
@@ -1314,7 +1314,7 @@
       "single_word": false,
       "special": true
     },
-    "126244": {
+    "157055": {
       "content": "<|reserved_token_160|>",
       "lstrip": false,
       "normalized": false,
@@ -1322,7 +1322,7 @@
       "single_word": false,
       "special": true
     },
-    "126245": {
+    "157056": {
       "content": "<|reserved_token_161|>",
       "lstrip": false,
       "normalized": false,
@@ -1330,7 +1330,7 @@
       "single_word": false,
       "special": true
     },
-    "126246": {
+    "157057": {
       "content": "<|reserved_token_162|>",
       "lstrip": false,
       "normalized": false,
@@ -1338,7 +1338,7 @@
       "single_word": false,
       "special": true
     },
-    "126247": {
+    "157058": {
       "content": "<|reserved_token_163|>",
       "lstrip": false,
       "normalized": false,
@@ -1346,7 +1346,7 @@
       "single_word": false,
       "special": true
     },
-    "126248": {
+    "157059": {
       "content": "<|reserved_token_164|>",
       "lstrip": false,
       "normalized": false,
@@ -1354,7 +1354,7 @@
       "single_word": false,
       "special": true
     },
-    "126249": {
+    "157060": {
       "content": "<|reserved_token_165|>",
       "lstrip": false,
       "normalized": false,
@@ -1362,7 +1362,7 @@
       "single_word": false,
       "special": true
     },
-    "126250": {
+    "157061": {
       "content": "<|reserved_token_166|>",
       "lstrip": false,
       "normalized": false,
@@ -1370,7 +1370,7 @@
       "single_word": false,
       "special": true
     },
-    "126251": {
+    "157062": {
       "content": "<|reserved_token_167|>",
       "lstrip": false,
       "normalized": false,
@@ -1378,7 +1378,7 @@
       "single_word": false,
       "special": true
     },
-    "126252": {
+    "157063": {
       "content": "<|reserved_token_168|>",
       "lstrip": false,
       "normalized": false,
@@ -1386,7 +1386,7 @@
       "single_word": false,
       "special": true
     },
-    "126253": {
+    "157064": {
       "content": "<|reserved_token_169|>",
       "lstrip": false,
       "normalized": false,
@@ -1394,7 +1394,7 @@
       "single_word": false,
       "special": true
     },
-    "126254": {
+    "157065": {
       "content": "<|reserved_token_170|>",
       "lstrip": false,
       "normalized": false,
@@ -1402,7 +1402,7 @@
       "single_word": false,
       "special": true
     },
-    "126255": {
+    "157066": {
       "content": "<|reserved_token_171|>",
       "lstrip": false,
       "normalized": false,
@@ -1410,7 +1410,7 @@
       "single_word": false,
       "special": true
     },
-    "126256": {
+    "157067": {
       "content": "<|reserved_token_172|>",
       "lstrip": false,
       "normalized": false,
@@ -1418,7 +1418,7 @@
       "single_word": false,
       "special": true
     },
-    "126257": {
+    "157068": {
       "content": "<|reserved_token_173|>",
       "lstrip": false,
       "normalized": false,
@@ -1426,7 +1426,7 @@
       "single_word": false,
       "special": true
     },
-    "126258": {
+    "157069": {
       "content": "<|reserved_token_174|>",
       "lstrip": false,
       "normalized": false,
@@ -1434,7 +1434,7 @@
       "single_word": false,
       "special": true
     },
-    "126259": {
+    "157070": {
       "content": "<|reserved_token_175|>",
       "lstrip": false,
       "normalized": false,
@@ -1442,7 +1442,7 @@
       "single_word": false,
       "special": true
     },
-    "126260": {
+    "157071": {
       "content": "<|reserved_token_176|>",
       "lstrip": false,
       "normalized": false,
@@ -1450,7 +1450,7 @@
       "single_word": false,
       "special": true
     },
-    "126261": {
+    "157072": {
       "content": "<|reserved_token_177|>",
       "lstrip": false,
       "normalized": false,
@@ -1458,7 +1458,7 @@
       "single_word": false,
       "special": true
     },
-    "126262": {
+    "157073": {
       "content": "<|reserved_token_178|>",
       "lstrip": false,
       "normalized": false,
@@ -1466,7 +1466,7 @@
       "single_word": false,
       "special": true
     },
-    "126263": {
+    "157074": {
       "content": "<|reserved_token_179|>",
       "lstrip": false,
       "normalized": false,
@@ -1474,7 +1474,7 @@
       "single_word": false,
       "special": true
     },
-    "126264": {
+    "157075": {
       "content": "<|reserved_token_180|>",
       "lstrip": false,
       "normalized": false,
@@ -1482,7 +1482,7 @@
       "single_word": false,
       "special": true
     },
-    "126265": {
+    "157076": {
       "content": "<|reserved_token_181|>",
       "lstrip": false,
       "normalized": false,
@@ -1490,7 +1490,7 @@
       "single_word": false,
       "special": true
     },
-    "126266": {
+    "157077": {
       "content": "<|reserved_token_182|>",
       "lstrip": false,
       "normalized": false,
@@ -1498,7 +1498,7 @@
       "single_word": false,
       "special": true
     },
-    "126267": {
+    "157078": {
       "content": "<|reserved_token_183|>",
       "lstrip": false,
       "normalized": false,
@@ -1506,7 +1506,7 @@
       "single_word": false,
       "special": true
     },
-    "126268": {
+    "157079": {
       "content": "<|reserved_token_184|>",
       "lstrip": false,
       "normalized": false,
@@ -1514,7 +1514,7 @@
       "single_word": false,
       "special": true
     },
-    "126269": {
+    "157080": {
       "content": "<|reserved_token_185|>",
       "lstrip": false,
       "normalized": false,
@@ -1522,7 +1522,7 @@
       "single_word": false,
       "special": true
     },
-    "126270": {
+    "157081": {
       "content": "<|reserved_token_186|>",
       "lstrip": false,
       "normalized": false,
@@ -1530,7 +1530,7 @@
       "single_word": false,
       "special": true
     },
-    "126271": {
+    "157082": {
       "content": "<|reserved_token_187|>",
       "lstrip": false,
       "normalized": false,
@@ -1538,7 +1538,7 @@
       "single_word": false,
       "special": true
     },
-    "126272": {
+    "157083": {
       "content": "<|reserved_token_188|>",
       "lstrip": false,
       "normalized": false,
@@ -1546,7 +1546,7 @@
       "single_word": false,
       "special": true
     },
-    "126273": {
+    "157084": {
       "content": "<|reserved_token_189|>",
       "lstrip": false,
       "normalized": false,
@@ -1554,7 +1554,7 @@
       "single_word": false,
       "special": true
     },
-    "126274": {
+    "157085": {
       "content": "<|reserved_token_190|>",
       "lstrip": false,
       "normalized": false,
@@ -1562,7 +1562,7 @@
       "single_word": false,
       "special": true
     },
-    "126275": {
+    "157086": {
       "content": "<|reserved_token_191|>",
       "lstrip": false,
       "normalized": false,
@@ -1570,7 +1570,7 @@
       "single_word": false,
       "special": true
     },
-    "126276": {
+    "157087": {
       "content": "<|reserved_token_192|>",
       "lstrip": false,
       "normalized": false,
@@ -1578,7 +1578,7 @@
       "single_word": false,
       "special": true
     },
-    "126277": {
+    "157088": {
       "content": "<|reserved_token_193|>",
       "lstrip": false,
       "normalized": false,
@@ -1586,7 +1586,7 @@
       "single_word": false,
       "special": true
     },
-    "126278": {
+    "157089": {
       "content": "<|reserved_token_194|>",
       "lstrip": false,
       "normalized": false,
@@ -1594,7 +1594,7 @@
       "single_word": false,
       "special": true
     },
-    "126279": {
+    "157090": {
       "content": "<|reserved_token_195|>",
       "lstrip": false,
       "normalized": false,
@@ -1602,7 +1602,7 @@
       "single_word": false,
       "special": true
     },
-    "126280": {
+    "157091": {
       "content": "<|reserved_token_196|>",
       "lstrip": false,
       "normalized": false,
@@ -1610,7 +1610,7 @@
       "single_word": false,
       "special": true
     },
-    "126281": {
+    "157092": {
       "content": "<|reserved_token_197|>",
       "lstrip": false,
       "normalized": false,
@@ -1618,7 +1618,7 @@
       "single_word": false,
       "special": true
     },
-    "126282": {
+    "157093": {
       "content": "<|reserved_token_198|>",
       "lstrip": false,
       "normalized": false,
@@ -1626,7 +1626,7 @@
       "single_word": false,
       "special": true
     },
-    "126283": {
+    "157094": {
       "content": "<|reserved_token_199|>",
       "lstrip": false,
       "normalized": false,
@@ -1634,7 +1634,7 @@
       "single_word": false,
       "special": true
     },
-    "126284": {
+    "157095": {
       "content": "<|reserved_token_200|>",
       "lstrip": false,
       "normalized": false,
@@ -1642,7 +1642,7 @@
       "single_word": false,
       "special": true
     },
-    "126285": {
+    "157096": {
       "content": "<|reserved_token_201|>",
       "lstrip": false,
       "normalized": false,
@@ -1650,7 +1650,7 @@
       "single_word": false,
       "special": true
     },
-    "126286": {
+    "157097": {
       "content": "<|reserved_token_202|>",
       "lstrip": false,
       "normalized": false,
@@ -1658,7 +1658,7 @@
       "single_word": false,
       "special": true
     },
-    "126287": {
+    "157098": {
       "content": "<|reserved_token_203|>",
       "lstrip": false,
       "normalized": false,
@@ -1666,7 +1666,7 @@
       "single_word": false,
       "special": true
     },
-    "126288": {
+    "157099": {
       "content": "<|reserved_token_204|>",
       "lstrip": false,
       "normalized": false,
@@ -1674,7 +1674,7 @@
       "single_word": false,
       "special": true
     },
-    "126289": {
+    "157100": {
       "content": "<|reserved_token_205|>",
       "lstrip": false,
       "normalized": false,
@@ -1682,7 +1682,7 @@
       "single_word": false,
       "special": true
     },
-    "126290": {
+    "157101": {
       "content": "<|reserved_token_206|>",
       "lstrip": false,
       "normalized": false,
@@ -1690,7 +1690,7 @@
       "single_word": false,
       "special": true
     },
-    "126291": {
+    "157102": {
       "content": "<|reserved_token_207|>",
       "lstrip": false,
       "normalized": false,
@@ -1698,7 +1698,7 @@
       "single_word": false,
       "special": true
     },
-    "126292": {
+    "157103": {
       "content": "<|reserved_token_208|>",
       "lstrip": false,
       "normalized": false,
@@ -1706,7 +1706,7 @@
       "single_word": false,
       "special": true
     },
-    "126293": {
+    "157104": {
       "content": "<|reserved_token_209|>",
       "lstrip": false,
       "normalized": false,
@@ -1714,7 +1714,7 @@
       "single_word": false,
       "special": true
     },
-    "126294": {
+    "157105": {
       "content": "<|reserved_token_210|>",
       "lstrip": false,
       "normalized": false,
@@ -1722,7 +1722,7 @@
       "single_word": false,
       "special": true
     },
-    "126295": {
+    "157106": {
       "content": "<|reserved_token_211|>",
       "lstrip": false,
       "normalized": false,
@@ -1730,7 +1730,7 @@
       "single_word": false,
       "special": true
     },
-    "126296": {
+    "157107": {
       "content": "<|reserved_token_212|>",
       "lstrip": false,
       "normalized": false,
@@ -1738,7 +1738,7 @@
       "single_word": false,
       "special": true
     },
-    "126297": {
+    "157108": {
       "content": "<|reserved_token_213|>",
       "lstrip": false,
       "normalized": false,
@@ -1746,7 +1746,7 @@
       "single_word": false,
       "special": true
     },
-    "126298": {
+    "157109": {
       "content": "<|reserved_token_214|>",
       "lstrip": false,
       "normalized": false,
@@ -1754,7 +1754,7 @@
       "single_word": false,
       "special": true
     },
-    "126299": {
+    "157110": {
       "content": "<|reserved_token_215|>",
       "lstrip": false,
       "normalized": false,
@@ -1762,7 +1762,7 @@
       "single_word": false,
       "special": true
     },
-    "126300": {
+    "157111": {
       "content": "<|reserved_token_216|>",
       "lstrip": false,
       "normalized": false,
@@ -1770,7 +1770,7 @@
       "single_word": false,
       "special": true
     },
-    "126301": {
+    "157112": {
       "content": "<|reserved_token_217|>",
       "lstrip": false,
       "normalized": false,
@@ -1778,7 +1778,7 @@
       "single_word": false,
       "special": true
     },
-    "126302": {
+    "157113": {
       "content": "<|reserved_token_218|>",
       "lstrip": false,
       "normalized": false,
@@ -1786,7 +1786,7 @@
       "single_word": false,
       "special": true
     },
-    "126303": {
+    "157114": {
       "content": "<|reserved_token_219|>",
       "lstrip": false,
       "normalized": false,
@@ -1794,7 +1794,7 @@
       "single_word": false,
       "special": true
     },
-    "126304": {
+    "157115": {
       "content": "<|reserved_token_220|>",
       "lstrip": false,
       "normalized": false,
@@ -1802,7 +1802,7 @@
       "single_word": false,
       "special": true
     },
-    "126305": {
+    "157116": {
       "content": "<|reserved_token_221|>",
       "lstrip": false,
       "normalized": false,
@@ -1810,7 +1810,7 @@
       "single_word": false,
       "special": true
     },
-    "126306": {
+    "157117": {
       "content": "<|reserved_token_222|>",
       "lstrip": false,
       "normalized": false,
@@ -1818,7 +1818,7 @@
       "single_word": false,
       "special": true
     },
-    "126307": {
+    "157118": {
       "content": "<|reserved_token_223|>",
       "lstrip": false,
       "normalized": false,
@@ -1826,7 +1826,7 @@
       "single_word": false,
       "special": true
     },
-    "126308": {
+    "157119": {
       "content": "<|reserved_token_224|>",
       "lstrip": false,
       "normalized": false,
@@ -1834,7 +1834,7 @@
       "single_word": false,
       "special": true
     },
-    "126309": {
+    "157120": {
       "content": "<|reserved_token_225|>",
       "lstrip": false,
       "normalized": false,
@@ -1842,7 +1842,7 @@
       "single_word": false,
       "special": true
     },
-    "126310": {
+    "157121": {
       "content": "<|reserved_token_226|>",
       "lstrip": false,
       "normalized": false,
@@ -1850,7 +1850,7 @@
       "single_word": false,
       "special": true
     },
-    "126311": {
+    "157122": {
       "content": "<|reserved_token_227|>",
       "lstrip": false,
       "normalized": false,
@@ -1858,7 +1858,7 @@
       "single_word": false,
       "special": true
     },
-    "126312": {
+    "157123": {
       "content": "<|reserved_token_228|>",
       "lstrip": false,
       "normalized": false,
@@ -1866,7 +1866,7 @@
       "single_word": false,
       "special": true
     },
-    "126313": {
+    "157124": {
       "content": "<|reserved_token_229|>",
       "lstrip": false,
       "normalized": false,
@@ -1874,7 +1874,7 @@
       "single_word": false,
       "special": true
     },
-    "126314": {
+    "157125": {
       "content": "<|reserved_token_230|>",
       "lstrip": false,
       "normalized": false,
@@ -1882,7 +1882,7 @@
       "single_word": false,
       "special": true
     },
-    "126315": {
+    "157126": {
       "content": "<|reserved_token_231|>",
       "lstrip": false,
       "normalized": false,
@@ -1890,7 +1890,7 @@
       "single_word": false,
       "special": true
     },
-    "126316": {
+    "157127": {
       "content": "<|reserved_token_232|>",
       "lstrip": false,
       "normalized": false,
@@ -1898,7 +1898,7 @@
       "single_word": false,
       "special": true
     },
-    "126317": {
+    "157128": {
       "content": "<|reserved_token_233|>",
       "lstrip": false,
       "normalized": false,
@@ -1906,7 +1906,7 @@
       "single_word": false,
       "special": true
     },
-    "126318": {
+    "157129": {
       "content": "<|reserved_token_234|>",
       "lstrip": false,
       "normalized": false,
@@ -1914,7 +1914,7 @@
       "single_word": false,
       "special": true
     },
-    "126319": {
+    "157130": {
       "content": "<|reserved_token_235|>",
       "lstrip": false,
       "normalized": false,
@@ -1922,7 +1922,7 @@
       "single_word": false,
       "special": true
     },
-    "126320": {
+    "157131": {
       "content": "<|reserved_token_236|>",
       "lstrip": false,
       "normalized": false,
@@ -1930,7 +1930,7 @@
       "single_word": false,
       "special": true
     },
-    "126321": {
+    "157132": {
       "content": "<|reserved_token_237|>",
       "lstrip": false,
       "normalized": false,
@@ -1938,7 +1938,7 @@
       "single_word": false,
       "special": true
     },
-    "126322": {
+    "157133": {
       "content": "<|reserved_token_238|>",
       "lstrip": false,
       "normalized": false,
@@ -1946,7 +1946,7 @@
       "single_word": false,
       "special": true
     },
-    "126323": {
+    "157134": {
       "content": "<|reserved_token_239|>",
       "lstrip": false,
       "normalized": false,
@@ -1954,7 +1954,7 @@
       "single_word": false,
       "special": true
     },
-    "126324": {
+    "157135": {
       "content": "<|reserved_token_240|>",
       "lstrip": false,
       "normalized": false,
@@ -1962,7 +1962,7 @@
       "single_word": false,
       "special": true
     },
-    "126325": {
+    "157136": {
       "content": "<|reserved_token_241|>",
       "lstrip": false,
       "normalized": false,
@@ -1970,7 +1970,7 @@
       "single_word": false,
       "special": true
     },
-    "126326": {
+    "157137": {
       "content": "<|reserved_token_242|>",
       "lstrip": false,
       "normalized": false,
@@ -1978,7 +1978,7 @@
       "single_word": false,
       "special": true
     },
-    "126327": {
+    "157138": {
       "content": "<|reserved_token_243|>",
       "lstrip": false,
       "normalized": false,
@@ -1986,7 +1986,7 @@
       "single_word": false,
       "special": true
     },
-    "126328": {
+    "157139": {
       "content": "<|reserved_token_244|>",
       "lstrip": false,
       "normalized": false,
@@ -1994,7 +1994,7 @@
       "single_word": false,
       "special": true
     },
-    "126329": {
+    "157140": {
       "content": "<|reserved_token_245|>",
       "lstrip": false,
       "normalized": false,
@@ -2002,7 +2002,7 @@
       "single_word": false,
       "special": true
     },
-    "126330": {
+    "157141": {
       "content": "<|reserved_token_246|>",
       "lstrip": false,
       "normalized": false,
@@ -2010,7 +2010,7 @@
       "single_word": false,
       "special": true
     },
-    "126331": {
+    "157142": {
       "content": "<|reserved_token_247|>",
       "lstrip": false,
       "normalized": false,
@@ -2018,7 +2018,7 @@
       "single_word": false,
       "special": true
     },
-    "126332": {
+    "157143": {
       "content": "<|reserved_token_248|>",
       "lstrip": false,
       "normalized": false,
@@ -2026,7 +2026,7 @@
       "single_word": false,
       "special": true
     },
-    "126333": {
+    "157144": {
       "content": "<|reserved_token_249|>",
       "lstrip": false,
       "normalized": false,
@@ -2034,7 +2034,7 @@
       "single_word": false,
       "special": true
     },
-    "126334": {
+    "157145": {
       "content": "<|reserved_token_250|>",
       "lstrip": false,
       "normalized": false,
@@ -2042,7 +2042,7 @@
       "single_word": false,
       "special": true
     },
-    "126335": {
+    "157146": {
       "content": "<|reserved_token_251|>",
       "lstrip": false,
       "normalized": false,
@@ -2050,7 +2050,7 @@
       "single_word": false,
       "special": true
     },
-    "126336": {
+    "157147": {
       "content": "<|reserved_token_252|>",
       "lstrip": false,
       "normalized": false,
@@ -2058,7 +2058,7 @@
       "single_word": false,
       "special": true
     },
-    "126337": {
+    "157148": {
       "content": "<|reserved_token_253|>",
       "lstrip": false,
       "normalized": false,
@@ -2066,7 +2066,7 @@
       "single_word": false,
       "special": true
     },
-    "126338": {
+    "157149": {
       "content": "<|reserved_token_254|>",
       "lstrip": false,
       "normalized": false,
@@ -2074,7 +2074,7 @@
       "single_word": false,
       "special": true
     },
-    "126339": {
+    "157150": {
       "content": "<|reserved_token_255|>",
       "lstrip": false,
       "normalized": false,
@@ -2082,7 +2082,7 @@
       "single_word": false,
       "special": true
     },
-    "126340": {
+    "157151": {
       "content": "<role>",
       "lstrip": false,
       "normalized": false,
@@ -2090,7 +2090,7 @@
       "single_word": false,
       "special": true
     },
-    "126341": {
+    "157152": {
       "content": "</role>",
       "lstrip": false,
       "normalized": false,
@@ -2098,15 +2098,7 @@
       "single_word": false,
       "special": true
     },
-    "126342": {
-      "content": "<|arithmetic_start|>",
-      "lstrip": false,
-      "normalized": false,
-      "rstrip": false,
-      "single_word": false,
-      "special": true
-    },
-    "126343": {
+    "157153": {
       "content": "<|arithmetic_end|>",
       "lstrip": false,
       "normalized": false,
@@ -2114,15 +2106,7 @@
       "single_word": false,
       "special": true
     },
-    "126344": {
-      "content": "<|number_start|>",
-      "lstrip": false,
-      "normalized": false,
-      "rstrip": false,
-      "single_word": false,
-      "special": true
-    },
-    "126345": {
+    "157154": {
       "content": "<|number_end|>",
       "lstrip": false,
       "normalized": false,
@@ -2130,7 +2114,23 @@
       "single_word": false,
       "special": true
     },
-    "126346": {
+    "157155": {
+      "content": "<|arithmetic_start|>",
+      "lstrip": false,
+      "normalized": false,
+      "rstrip": false,
+      "single_word": false,
+      "special": true
+    },
+    "157156": {
+      "content": "<|number_start|>",
+      "lstrip": false,
+      "normalized": false,
+      "rstrip": false,
+      "single_word": false,
+      "special": true
+    },
+    "157157": {
       "content": "<imagePatch>",
       "lstrip": false,
       "normalized": false,
@@ -2138,7 +2138,7 @@
       "single_word": false,
       "special": true
     },
-    "126347": {
+    "157158": {
       "content": "<image>",
       "lstrip": false,
       "normalized": false,
@@ -2146,7 +2146,7 @@
       "single_word": false,
       "special": true
     },
-    "126348": {
+    "157159": {
       "content": "</image>",
       "lstrip": false,
       "normalized": false,
@@ -2154,7 +2154,7 @@
       "single_word": false,
       "special": true
     },
-    "126349": {
+    "157160": {
       "content": "<video>",
       "lstrip": false,
       "normalized": false,
@@ -2162,7 +2162,7 @@
       "single_word": false,
       "special": true
     },
-    "126350": {
+    "157161": {
       "content": "</video>",
       "lstrip": false,
       "normalized": false,
@@ -2170,7 +2170,7 @@
       "single_word": false,
       "special": true
     },
-    "126351": {
+    "157162": {
       "content": "<gen_imagePatch>",
       "lstrip": false,
       "normalized": false,
@@ -2178,7 +2178,7 @@
       "single_word": false,
       "special": true
     },
-    "126352": {
+    "157163": {
       "content": "<gen_image>",
       "lstrip": false,
       "normalized": false,
@@ -2186,7 +2186,7 @@
       "single_word": false,
       "special": true
     },
-    "126353": {
+    "157164": {
       "content": "</gen_image>",
       "lstrip": false,
       "normalized": false,
@@ -2194,7 +2194,7 @@
       "single_word": false,
       "special": true
     },
-    "126354": {
+    "157165": {
       "content": "<imageHere>",
       "lstrip": false,
       "normalized": false,
@@ -2202,7 +2202,7 @@
       "single_word": false,
       "special": true
     },
-    "126355": {
+    "157166": {
       "content": "<end_of_chunk>",
       "lstrip": false,
       "normalized": false,
@@ -2210,7 +2210,7 @@
       "single_word": false,
       "special": true
     },
-    "126356": {
+    "157167": {
       "content": "<end_of_audio>",
       "lstrip": false,
       "normalized": false,
@@ -2218,7 +2218,7 @@
       "single_word": false,
       "special": true
     },
-    "126357": {
+    "157168": {
       "content": "<audioPatch>",
       "lstrip": false,
       "normalized": false,
@@ -2226,7 +2226,7 @@
       "single_word": false,
       "special": true
     },
-    "126358": {
+    "157169": {
       "content": "<audio>",
       "lstrip": false,
       "normalized": false,
@@ -2234,7 +2234,7 @@
       "single_word": false,
       "special": true
     },
-    "126359": {
+    "157170": {
       "content": "</audio>",
       "lstrip": false,
       "normalized": false,
@@ -2242,7 +2242,7 @@
       "single_word": false,
       "special": true
     },
-    "126360": {
+    "157171": {
       "content": "<gen_audioPatch>",
       "lstrip": false,
       "normalized": false,
@@ -2250,7 +2250,7 @@
       "single_word": false,
       "special": true
     },
-    "126361": {
+    "157172": {
       "content": "<gen_audio>",
       "lstrip": false,
       "normalized": false,
@@ -2258,7 +2258,7 @@
       "single_word": false,
       "special": true
     },
-    "126362": {
+    "157173": {
       "content": "</gen_audio>",
       "lstrip": false,
       "normalized": false,
@@ -2266,7 +2266,7 @@
       "single_word": false,
       "special": true
     },
-    "126363": {
+    "157174": {
       "content": "<audioHere>",
       "lstrip": false,
       "normalized": false,
@@ -2274,7 +2274,7 @@
       "single_word": false,
       "special": true
     },
-    "126364": {
+    "157175": {
       "content": "<framePatch>",
       "lstrip": false,
       "normalized": false,
@@ -2282,7 +2282,7 @@
       "single_word": false,
       "special": true
     },
-    "126365": {
+    "157176": {
       "content": "<text>",
       "lstrip": false,
       "normalized": false,
@@ -2290,7 +2290,7 @@
       "single_word": false,
       "special": true
     },
-    "126366": {
+    "157177": {
       "content": "<asr>",
       "lstrip": false,
       "normalized": false,
@@ -2298,7 +2298,7 @@
       "single_word": false,
       "special": true
     },
-    "126367": {
+    "157178": {
       "content": "<tts>",
       "lstrip": false,
       "normalized": false,
@@ -2308,26 +2308,35 @@
     }
   },
   "additional_special_tokens": [
-    "<role>",
-    "</role>",
-    "<|arithmetic_start|>",
     "<|arithmetic_end|>",
+    "<role>",
+    "<|number_end|>",
+    "<|arithmetic_start|>",
+    "</role>",
     "<|number_start|>",
-    "<|number_end|>"
+    "<|role_end|>",
+    "<tool_call>",
+    "</tool_call>",
+    "<tool_response>",
+    "</tool_response>"
   ],
   "bos_token": "<|startoftext|>",
+  "chat_template": "{% set thinking_option = 'off' %}\n{{- '<role>SYSTEM</role>' }}\n{%- if messages[0].role == 'system' %}\n    {{- messages[0].content + '\\n\\n' }}\n{%- endif %}\n{%- if tools %}\n    {{- \"# Tools\\n\\nYou may call one or more functions to assist with the user query.\\n\\nYou are provided with function signatures within <tools></tools> XML tags:\\n<tools>\" }}\n    {%- for tool in tools %}\n        {{- \"\\n\" }}\n        {{- tool | tojson }}\n    {%- endfor %}\n    {{- \"\\n</tools>\\n\\nFor each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:\\n<tool_call>\\n{\\\"name\\\": <function-name>, \\\"arguments\\\": <args-json-object>}\\n</tool_call>\\n\" }}\n{%- endif %}\n{{- 'detailed thinking ' + thinking_option + '<|role_end|>' }}\n{%- set ns = namespace(multi_step_tool=true, last_query_index=messages|length - 1) %}\n{%- for message in messages[::-1] %}\n    {%- set index = (messages|length - 1) - loop.index0 %}\n    {%- if ns.multi_step_tool and message.role == \"user\" and message.content is string and not(message.content.startswith('<tool_response>') and message.content.endswith('</tool_response>')) %}\n        {%- set ns.multi_step_tool = false %}\n        {%- set ns.last_query_index = index %}\n    {%- endif %}\n{%- endfor %}\n{%- for message in messages %}\n    {%- if message.content is string %}\n        {%- set content = message.content %}\n    {%- else %}\n        {%- set content = '' %}\n    {%- endif %}\n    {%- if message.role == \"user\" %}\n        {{- '<role>HUMAN</role>' + message.content + '<|role_end|>' }}\n    {%- elif message.role == \"system\" and not loop.first %}\n        {{- '<role>SYSTEM</role>' + message.content + '<|role_end|>' }}\n    {%- elif message.role == \"assistant\" %}\n        {%- set reasoning_content = '' %}\n        {%- if message.reasoning_content is string %}\n            {%- set reasoning_content = message.reasoning_content %}\n        {%- else %}\n            {%- if '</think>' in content %}\n                {%- set reasoning_content = content.split('</think>')[0].rstrip('\\n').split('<think>')[-1].lstrip('\\n') %}\n                {%- set content = content.split('</think>')[-1].lstrip('\\n') %}\n            {%- endif %}\n        {%- endif %}\n        {%- if loop.index0 > ns.last_query_index %}\n            {%- if reasoning_content %}\n                {{- '<role>ASSISTANT</role>' + '\\n<think>\\n' + reasoning_content.strip('\\n') + '\\n</think>\\n\\n' + content.lstrip('\\n') }}\n            {%- else %}\n                {{- '<role>ASSISTANT</role>' + content }}\n            {%- endif %}\n        {%- else %}\n            {{- '<role>ASSISTANT</role>' + content }}\n        {%- endif %}\n        {%- if message.tool_calls %}\n            {%- for tool_call in message.tool_calls %}\n                {%- if (loop.first and content) or (not loop.first) %}\n                    {{- '\\n' }}\n                {%- endif %}\n                {%- if tool_call.function %}\n                    {%- set tool_call = tool_call.function %}\n                {%- endif %}\n                {{- '<tool_call>\\n{\"name\": \"' }}\n                {{- tool_call.name }}\n                {{- '\", \"arguments\": ' }}\n                {%- if tool_call.arguments is string %}\n                    {{- tool_call.arguments }}\n                {%- else %}\n                    {{- tool_call.arguments | tojson }}\n                {%- endif %}\n                {{- '}\\n</tool_call>' }}\n            {%- endfor %}\n        {%- endif %}\n        {{- '<|role_end|>' }}\n    {%- elif message.role == \"tool\" %}\n        {%- if loop.first or (messages[loop.index0 - 1].role != \"tool\") %}\n            {{- '<role>OBSERVATION</role>' }}\n        {%- endif %}\n        {{- '\\n<tool_response>\\n' }}\n        {{- content }}\n        {{- '\\n</tool_response>' }}\n        {%- if loop.last or (messages[loop.index0 + 1].role != \"tool\") %}\n            {{- '<|role_end|>' }}\n        {%- endif %}\n    {%- endif %}\n{%- endfor %}\n{%- if add_generation_prompt %}\n    {{- '<role>ASSISTANT</role>' }}\n{%- endif %}",
   "clean_up_tokenization_spaces": false,
   "cls_token": "[CLS]",
-  "eos_token": "<|endoftext|>",
+  "eos_token": "<|role_end|>",
+  "extra_special_tokens": {},
+  "fast_tokenizer": true,
   "gmask_token": "[gMASK]",
   "merges_file": null,
   "model_max_length": 1000000000000000019884624838656,
-  "pad_token": "<|endoftext|>",
+  "pad_token": "<|role_end|>",
   "auto_map": {
     "AutoTokenizer": [
       "tokenization_bailing.BailingTokenizer",
       null
     ]
   },
-  "tokenizer_class": "BailingTokenizer"
+  "tokenizer_class": "BailingTokenizer",
+  "trust_remote_code": true
 }

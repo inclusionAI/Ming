@@ -1,11 +1,11 @@
 {
     "auto_map": {
-        "AutoImageProcessor": "image_processing_bailingmm.BailingMMImageProcessor",
-        "AutoFeatureExtractor": "audio_processing_bailingmm.BailingMMAudioProcessor",
-        "AutoProcessor": "processing_bailingmm.BailingMMProcessor"
+        "AutoImageProcessor": "image_processing_bailingmm2.BailingMM2ImageProcessor",
+        "AutoFeatureExtractor": "audio_processing_bailingmm2.BailingMM2AudioProcessor",
+        "AutoProcessor": "processing_bailingmm2.BailingMM2Processor"
     },
     "min_pixels": 78400,
-    "max_pixels": 802816,
+    "max_pixels": 2007040,
     "patch_size": 14,
     "temporal_patch_size": 2,
     "merge_size": 2,
@@ -21,8 +21,8 @@
     ],
     "image_token": "<image>",
     "video_token": "<video>",
-    "image_processor_type": "BailingMMImageProcessor",
-    "audio_processor_type": "BailingMMAudioProcessor",
+    "image_processor_type": "BailingMM2ImageProcessor",
+    "feature_extractor_type": "BailingMM2AudioProcessor",
     "audio_token": "<audio>",
     "chunk_length": 30,
     "dither": 0.0,
@@ -39,7 +39,7 @@
     "return_attention_mask": true,
     "padding_side": "right",
     "padding_value": 0.0,
-    "processor_class": "BailingMMProcessor",
+    "processor_class": "BailingMM2Processor",
     "wav_frontend_args": {
         "cmvn_file": "am.mvn",
         "fs": 16000,

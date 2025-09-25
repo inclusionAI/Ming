@@ -20,7 +20,8 @@ soundfile==0.12.1
 librosa
 rich
 mmgw-python
-transformers==4.52.4
+transformers==4.53.0
+accelerate==0.26.0
 # flash_attn==2.7.0  # to accelerate installation process, please install  ${YOUR_MODEL_PATH}/flash_attn-2.7.0.post1%2Bcu12torch2.4cxx11abiFALSE-cp310-cp310-linux_x86_64.whl
 wget
 IPython

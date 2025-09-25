@@ -12,7 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Processor class for BailingMM."""
+"""Processor class for BailingMM2."""
 
 import numpy as np
 import sys
@@ -28,11 +28,14 @@ else:
 
 from transformers.feature_extraction_utils import BatchFeature
 from transformers.image_utils import ImageInput
-from transformers.processing_utils import ProcessingKwargs, ProcessorMixin
+from transformers.video_utils import VideoInput
+from transformers.processing_utils import (
+    ProcessingKwargs,
+    ProcessorMixin,
+)
 from transformers.tokenization_utils_base import PreTokenizedInput, TextInput
 
-from bailingmm_utils import process_vision_info, process_ratio, VideoInput
-import torchvision
+from bailingmm_utils import process_vision_info
 
 DEFAULT_IMAGE_PATCH_TOKEN = "<imagePatch>"
 DEFAULT_IM_START_TOKEN = "<image>"
@@ -61,8 +64,11 @@ DEFAULT_TTS_TOKEN = '<tts>'
 USER_PREFIX = "<role>HUMAN</role>"
 ASSISTANT_PREFIX = "<role>ASSISTANT</role>"
 
+SYSTEM_PROMPT_LINGV2_FLASH_NOTHINK = "<role>SYSTEM</role>你是一个友好的AI助手。\n\ndetailed thinking off"
+SYSTEM_PROMPT_LINGV2_FLASH_THINK = "<role>SYSTEM</role>你是一个友好的AI助手。\n\ndetailed thinking on"
 
-class BailingMMProcessorKwargs(ProcessingKwargs, total=False):
+
+class BailingMM2ProcessorKwargs(ProcessingKwargs, total=False):
     # see processing_utils.ProcessingKwargs documentation for usage.
     _defaults = {
         "text_kwargs": {"padding": False, "padding_side": "right"},
@@ -71,13 +77,13 @@ class BailingMMProcessorKwargs(ProcessingKwargs, total=False):
         "audio_kwargs": {"padding": "max_length", "return_tensors": True, "use_whisper_encoder": False},
     }
 
-class BailingMMProcessor(ProcessorMixin):
+class BailingMM2Processor(ProcessorMixin):
     r"""
-    Constructs a BailingMM processor which wraps a bailingmm image processor, bailing audio processor and a LLaMa tokenizer into a single processor.
+    Constructs a BailingMM2 processor which wraps a bailingmm2 image processor, bailing audio processor and a LLaMa tokenizer into a single processor.
     Args:
-        image_processor ([`BailingMMImageProcessor`], *optional*):
+        image_processor ([`BailingMM2ImageProcessor`], *optional*):
             The image processor is a required input.
-        audio_processor ([`BailingMMAudioProcessor`], *optional*):
+        audio_processor ([`BailingMM2AudioProcessor`], *optional*):
             The audio processor is a required input.
         tokenizer ([`LlamaTokenizerFast`], *optional*):
             The tokenizer is a required input.
@@ -117,7 +123,7 @@ class BailingMMProcessor(ProcessorMixin):
         image_token="<image>",
         video_token="<video>",
         audio_token="<audio>",
-        **kwargs: Unpack[BailingMMProcessorKwargs],
+        **kwargs: Unpack[BailingMM2ProcessorKwargs],
     ):
         self.image_token = image_token
         self.video_token = video_token
@@ -126,7 +132,7 @@ class BailingMMProcessor(ProcessorMixin):
         if chat_template is None:
             chat_template = tokenizer.chat_template
 
-        self.gen_terminator = [tokenizer.convert_tokens_to_ids("<|endoftext|>")]
+        self.gen_terminator = [tokenizer.eos_token_id]
         super().__init__(image_processor, audio_processor, tokenizer, chat_template=chat_template)
 
     def __call__(
@@ -172,7 +178,7 @@ class BailingMMProcessor(ProcessorMixin):
 
         """
         output_kwargs = self._merge_kwargs(
-            BailingMMProcessorKwargs,
+            BailingMM2ProcessorKwargs,
             tokenizer_init_kwargs=self.tokenizer.init_kwargs,
             **kwargs,
         )
@@ -188,24 +194,11 @@ class BailingMMProcessor(ProcessorMixin):
         image_inputs = {}
         video_inputs = {}
         audio_inputs = {}
-        image_gen_inputs = {}
 
         if images is not None:
             image_inputs = self.image_processor(images=images, videos=None, **output_kwargs["images_kwargs"])
             image_grid_thw = image_inputs["image_grid_thw"]
             text = self._expand_image_tokens(text, image_grid_thw)
-
-            ref_pil = images[0] if isinstance(images, list) else images
-            ref_pil = ref_pil.convert("RGB")
-            closest_size, resize_size = process_ratio(ori_h=ref_pil.size[1], ori_w=ref_pil.size[0])
-            ref_pil = torchvision.transforms.functional.resize(ref_pil, resize_size, interpolation=torchvision.transforms.InterpolationMode.BILINEAR)
-            ref_pil = torchvision.transforms.functional.center_crop(ref_pil, closest_size)
-            ref_tensor = ((torchvision.transforms.functional.to_tensor(ref_pil) - 0.5) * 2.0).unsqueeze(0)
-            image_gen_inputs = {
-                "pixel_values_reference": ref_tensor,
-                "image_gen_height": torch.LongTensor([ref_pil.size[1]]),
-                "image_gen_width": torch.LongTensor([ref_pil.size[0]]),
-            }
 
         if videos is not None:
             video_inputs = self.image_processor(images=None, videos=videos, do_resize=False, **output_kwargs["videos_kwargs"])
@@ -231,15 +224,23 @@ class BailingMMProcessor(ProcessorMixin):
             audio_inputs["audio_placeholder_loc_lens"] = torch.tensor(loc_lens, dtype=torch.long)
             audio_inputs.pop('encoder_feats_lengths')
 
-        return BatchFeature(data={**text_inputs, **image_inputs, **video_inputs, **audio_inputs, **image_gen_inputs})
+        return BatchFeature(data={**text_inputs, **image_inputs, **video_inputs, **audio_inputs})
 
-    def apply_system_template(self, text):
-        return USER_PREFIX
+    def apply_system_template(self, sys_prompt_exp=None, use_cot_system_prompt=False):
+        if use_cot_system_prompt:
+            sys_prompt = SYSTEM_PROMPT_LINGV2_FLASH_THINK
+        else:
+            sys_prompt = SYSTEM_PROMPT_LINGV2_FLASH_NOTHINK
+        if sys_prompt_exp is not None:
+            sys_prompt = sys_prompt.replace("你是一个友好的AI助手。", sys_prompt_exp)
+
+        return sys_prompt
 
     def apply_chat_template(
         self,
         conversation: Union[List[Dict[str, str]]],
-        system_template: Optional[str] = None,
+        sys_prompt_exp: Optional[str] = None,
+        use_cot_system_prompt: Optional[bool] = False,
         **kwargs,
     ) -> str:
         """
@@ -249,18 +250,23 @@ class BailingMMProcessor(ProcessorMixin):
         Args:
             conversation (`List[Dict, str, str]`):
                 The conversation to format.
-            system_template (`Optional[str]`, *optional*):
-                The system template. If not provided, the processor's sysyetm template is used.
+            sys_prompt_exp (`Optional[str]`, *optional*):
+                The system prompt. If not provided, the processor's sysyetm template is used.
             **kwargs:
                 Additional keyword arguments
         """
         text = ""
+        sys_prompt = self.apply_system_template(sys_prompt_exp, use_cot_system_prompt)
+        text = sys_prompt + self.tokenizer.eos_token
+
         for idx, message in enumerate(conversation):
             assert message["role"] in ["HUMAN", "ASSISTANT"]
             if idx == len(conversation) - 1:
-                message["role"] == "HUMAN"
+                assert message["role"] == "HUMAN"
 
-            if message["role"] == "ASSISTANT":
+            if message["role"] == "HUMAN":
+                text += USER_PREFIX
+            elif message["role"] == "ASSISTANT":
                 text += ASSISTANT_PREFIX
 
             image_counts = str(message["content"]).count("<image>")
@@ -285,17 +291,9 @@ class BailingMMProcessor(ProcessorMixin):
                         text += audio_placeholder.rstrip("\n")
                 elif content["type"] == "text":
                     text += content['text']
-
-            if message["role"] == "ASSISTANT":
-                 text += "<|endoftext|>"
-                 text += USER_PREFIX
-            # text += "<|eot_id|>"
-            
-        if kwargs.get("add_generation_prompt", True):
-            text += ASSISTANT_PREFIX
-
-        sys_prompt = system_template if system_template is not None else self.apply_system_template(text)
-        text = sys_prompt + text
+            text += self.tokenizer.eos_token
+        text += ASSISTANT_PREFIX
+        
         return text
 
     def process_vision_info(
@@ -337,7 +335,7 @@ class BailingMMProcessor(ProcessorMixin):
             num_videos = sample.count(special_token)
             if num_videos > 0:
                 for i in range(video_index, num_videos + video_index):
-                    video_text = num_query_token[i] * DEFAULT_IMAGE_PATCH_TOKEN
+                    video_text = num_query_token[i] * DEFAULT_FRAME_PATCH_TOKEN
                     video_text = DEFAULT_VID_START_TOKEN + video_text + DEFAULT_VID_END_TOKEN + "\n"
                     sample = sample.replace(special_token, video_text, 1)
             video_index += num_videos

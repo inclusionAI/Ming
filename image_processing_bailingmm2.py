@@ -47,7 +47,6 @@ from transformers.image_utils import (
     validate_preprocess_arguments,
 )
 from transformers.utils import TensorType, is_vision_available, logging
-from bailingmm_utils import VideoInput
 logger = logging.get_logger(__name__)
 
 if is_vision_available():
@@ -121,9 +120,9 @@ def smart_resize(
         w_bar = math.ceil(width * beta / factor) * factor
     return h_bar, w_bar
 
-class BailingMMImageProcessor(BaseImageProcessor):
+class BailingMM2ImageProcessor(BaseImageProcessor):
     r"""
-    Constructs a BailingMM image processor that dynamically resizes images based on the original images.
+    Constructs a BailingMM2 image processor that dynamically resizes images based on the original images.
 
     Args:
         do_resize (`bool`, *optional*, defaults to `True`):
@@ -166,10 +165,8 @@ class BailingMMImageProcessor(BaseImageProcessor):
         image_mean: Optional[Union[float, List[float]]] = None,
         image_std: Optional[Union[float, List[float]]] = None,
         do_convert_rgb: bool = True,
-        min_pixels: int = 56 * 56,
-        max_pixels: int = 28 * 28 * 1280,
-        min_pixels_video: int = 128 * 28 * 28,
-        max_pixels_video: int = 768 * 28 * 28,
+        min_pixels: int = 78400,
+        max_pixels: int = 2007040,
         patch_size: int = 14,
         temporal_patch_size: int = 2,
         merge_size: int = 2,
@@ -185,8 +182,6 @@ class BailingMMImageProcessor(BaseImageProcessor):
         self.image_std = image_std if image_std is not None else OPENAI_CLIP_STD
         self.min_pixels = min_pixels
         self.max_pixels = max_pixels
-        self.min_pixels_video = min_pixels_video
-        self.max_pixels_video = max_pixels_video
         self.patch_size = patch_size
         self.temporal_patch_size = temporal_patch_size
         self.merge_size = merge_size
@@ -206,8 +201,6 @@ class BailingMMImageProcessor(BaseImageProcessor):
         do_convert_rgb: bool = None,
         data_format: Optional[ChannelDimension] = ChannelDimension.FIRST,
         input_data_format: Optional[Union[str, ChannelDimension]] = None,
-        min_pixels: int = None,
-        max_pixels: int = None,
     ):
         """
         Preprocess an image or batch of images. Copy of the `preprocess` method from `CLIPImageProcessor`.
@@ -270,8 +263,8 @@ class BailingMMImageProcessor(BaseImageProcessor):
                     height,
                     width,
                     factor=self.patch_size * self.merge_size,
-                    min_pixels=min_pixels,
-                    max_pixels=max_pixels,
+                    min_pixels=self.min_pixels,
+                    max_pixels=self.max_pixels,
                 )
                 image = resize(
                     image, size=(resized_height, resized_width), resample=resample, input_data_format=input_data_format
@@ -426,8 +419,6 @@ class BailingMMImageProcessor(BaseImageProcessor):
                     data_format=data_format,
                     do_convert_rgb=do_convert_rgb,
                     input_data_format=input_data_format,
-                    min_pixels=self.min_pixels,
-                    max_pixels=self.max_pixels
                 )
                 pixel_values.extend(patches)
                 vision_grid_thws.append(image_grid_thw)
@@ -450,8 +441,6 @@ class BailingMMImageProcessor(BaseImageProcessor):
                     data_format=data_format,
                     do_convert_rgb=do_convert_rgb,
                     input_data_format=input_data_format,
-                    min_pixels=self.min_pixels_video,
-                    max_pixels=self.max_pixels_video
                 )
                 pixel_values.extend(patches)
                 vision_grid_thws.append(video_grid_thw)

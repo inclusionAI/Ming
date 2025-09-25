@@ -48,7 +48,7 @@ DEFAULT_ASR_TOKEN = '<asr>'
 DEFAULT_TTS_TOKEN = '<tts>'
 
 
-class BailingMMAudioProcessor(FeatureExtractionMixin):
+class BailingMM2AudioProcessor(FeatureExtractionMixin):
     def __init__(self, wav_frontend_args: Dict[str, Any]=None, whisper_frontend_args: Dict[str, Any]=None, **kwargs):
         super().__init__(**kwargs)
         self.sample_rate = 16000
@@ -95,7 +95,7 @@ class BailingMMAudioProcessor(FeatureExtractionMixin):
         waveform: torch.Tensor,
         sample_rate: int,
         use_whisper_encoder: bool = False,
-        maximum_audio_duration: float = -1,
+        maximum_audio_duration: float = -1
     ) -> torch.Tensor:
         waveform = normalize_audio_tensor(waveform, sample_rate, target_sample_rate=self.sample_rate)
         if maximum_audio_duration > 0:
@@ -292,7 +292,8 @@ class WhisperFrontend:
         return feats_pad, feats_lens
 
 def load_cmvn(cmvn_file):
-    with open(cmvn_file, 'r', encoding='utf-8') as f:
+    src_dir = os.path.realpath(os.path.join(os.getcwd(), os.path.dirname(__file__)))
+    with open(os.path.join(src_dir, "am.mvn"), 'r', encoding='utf-8') as f:
         lines = f.readlines()
     means_list = []
     vars_list = []

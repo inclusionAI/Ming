@@ -2,15 +2,13 @@
 # coding=utf-8
 # Copyright (c) Ant Group. All rights reserved.
 
+import itertools
 from typing import Any, Dict, List, Optional, Union
 
-import numpy as np
 import torch
 from transformers import PreTrainedTokenizerFast
 from transformers.tokenization_utils_base import AddedToken, BatchEncoding
 from transformers.utils import TensorType, logging
-
-from chat_format import Chat
 
 logger = logging.get_logger(__name__)
 
@@ -106,7 +104,7 @@ class BailingTokenizer(PreTrainedTokenizerFast):
             bos_token=bos_token,
             eos_token=eos_token,
             cls_token=cls_token,
-            pad_token=eos_token,
+            pad_token=pad_token,
             gmask_token=gmask_token,
             add_bos_token=add_bos_token,
             add_eos_token=add_eos_token,
@@ -203,6 +201,8 @@ class BailingTokenizer(PreTrainedTokenizerFast):
         system = system or sys_msg
         if system:
             chat['system_message'] = system
+        from .chat_format import Chat
+
         return Chat.from_json(chat, name=chat_format)
 
     def apply_chat_template(
@@ -223,7 +223,9 @@ class BailingTokenizer(PreTrainedTokenizerFast):
         tokenizer_kwargs: Optional[Dict[str, Any]] = None,
         **kwargs,
     ):
-        if hasattr(PreTrainedTokenizerFast, "apply_chat_template"):
+        if hasattr(self, "chat_template") and self.chat_template:
+            if isinstance(conversation, Dict) and "messages" in conversation:
+                conversation = conversation["messages"]
             # use transformers built-in method
             return super().apply_chat_template(
                 conversation=conversation,
@@ -239,6 +241,10 @@ class BailingTokenizer(PreTrainedTokenizerFast):
                 return_assistant_tokens_mask=return_assistant_tokens_mask,
                 tokenizer_kwargs=tokenizer_kwargs,
             )
+
+        # 非chat_template方式后续将不再支持。
+        logger.warning("Please set chat_template in tokenizer_config.json!")
+
         chat_format = kwargs.get('chat_format', 'antglm_chat')
 
         is_batched = False
@@ -327,6 +333,7 @@ class BailingTokenizer(PreTrainedTokenizerFast):
         max_output_length=1024,
         rotary_type="none",
         unidirectional_attention: bool = True,
+        attention_dtype=None,
         **kwargs,
     ):
         if max_input_length and len(input_ids) > max_input_length:
@@ -379,16 +386,16 @@ class BailingTokenizer(PreTrainedTokenizerFast):
             total_length += 1
 
         def build_mask_matrix(seq_length, sep, mask_pos, unidirectional_attention):
-
+            # 长序列使用bool类型节省显存
             if unidirectional_attention:
-                attention_mask = np.ones([seq_length, seq_length])
-                attention_mask = np.tril(attention_mask)
+                attention_mask = torch.ones([seq_length, seq_length], dtype=attention_dtype)
+                attention_mask = torch.tril(attention_mask)
                 if is_left_padding:
                     attention_mask[:, :mask_pos] = 0
                 else:
                     attention_mask[:, mask_pos + 1 : sep] = 0
             else:
-                attention_mask = np.zeros([seq_length, seq_length])
+                attention_mask = torch.zeros([seq_length, seq_length], dtype=attention_dtype)
                 attention_mask[:, : mask_pos + 1] = 1
                 for i in range(sep, total_length):
                     attention_mask[i, sep : i + 1] = 1
@@ -398,13 +405,15 @@ class BailingTokenizer(PreTrainedTokenizerFast):
             attention_mask = build_mask_matrix(total_length, sep + 1, mask_pos, unidirectional_attention)
         else:
             attention_mask = build_mask_matrix(total_length, sep, mask_pos, unidirectional_attention)
-
+        attention_mask = torch.unsqueeze(attention_mask, dim=0)
+        attention_mask = torch.unsqueeze(attention_mask, dim=1)
+        if attention_dtype is None:
+            attention_mask = attention_mask.long()
         inputs = {
             "input_ids": torch.Tensor([input_ids]).long(),
             "position_ids": torch.Tensor([position_ids]).long(),
-            "attention_mask": torch.Tensor(np.expand_dims(attention_mask, axis=[0, 1])).long(),
+            "attention_mask": attention_mask,
         }
-
         return BatchEncoding(inputs)
 
     def build_inputs_for_generation(
@@ -415,6 +424,7 @@ class BailingTokenizer(PreTrainedTokenizerFast):
         max_output_length=1024,
         rotary_type="1d",
         unidirectional_attention=True,
+        attention_dtype=None,
         **kwargs,
     ):
         if isinstance(input_ids, torch.Tensor):
@@ -432,6 +442,7 @@ class BailingTokenizer(PreTrainedTokenizerFast):
                     max_output_length=max_output_length,
                     rotary_type=rotary_type,
                     unidirectional_attention=unidirectional_attention,
+                    attention_dtype=attention_dtype,
                     **kwargs,
                 )
                 input_ids_list.append(inputs['input_ids'])
@@ -494,8 +505,6 @@ class BailingTokenizer(PreTrainedTokenizerFast):
         inputs: Union[str, List[str]],
         outputs: Union[str, List[str]],
         new_conversation_offset: List[int] = None,
-        num_query_token: int = None,
-        max_num_query_token: int = None,
         max_length: int = 2048,
         rotary_type: str = "1d",
         left_truncate: bool = True,
@@ -504,6 +513,9 @@ class BailingTokenizer(PreTrainedTokenizerFast):
         padding: bool = True,
         use_fa2: bool = True,
         use_packed: bool = True,
+        use_baichuan_packed: bool = False,
+        skip_truncated_turn: bool = False,
+        return_attention_mask: bool = True,
     ):
         r"""
         Build tensor input for model training. If inputs and outputs are list, will pack them.
@@ -515,7 +527,20 @@ class BailingTokenizer(PreTrainedTokenizerFast):
             rotary_type (str, Optional): the rotary type of position embedding. Default: 1d
             left_truncate (bool, Optional): whether truncate the inputs from left. Default: True
             use_fa2 (bool, Optional): whether to build attention mask under flash attention 2.
+            new_conversation_offset (List[int], Optional): 第idx条样本是全新的对话，[0, 1]代表：inputs[0]和outputs[0]是一个对话，inputs[1]和outputs[1]是一个对话.
         """
+        if use_packed and use_baichuan_packed and unidirectional_attention:
+            return self._build_baichuan_inputs_for_train(
+                inputs,
+                outputs,
+                new_conversation_offset,
+                max_length,
+                rotary_type,
+                left_truncate,
+                skip_truncated_turn,
+                use_fa2,
+                padding,
+            )
         if isinstance(inputs, str):
             inputs = [inputs]
         if isinstance(outputs, str):
@@ -523,24 +548,20 @@ class BailingTokenizer(PreTrainedTokenizerFast):
 
         assert len(inputs) == len(outputs)
 
-        inputs = [item.replace('\\n', '\n') for item in inputs]
         input_ids = [self(item)['input_ids'] for item in inputs]
-
-        outputs = [item.replace('\\n', '\n') for item in outputs]
         output_ids = [self(item)['input_ids'] for item in outputs]
 
         packed_input_ids = []
         packed_output_ids = []
+        if new_conversation_offset is None:
+            new_conversation_offset = list(range(0, len(inputs)))
+        assert 0 in new_conversation_offset, f"没有0，请检查new_conversation_offset: {new_conversation_offset}"
         current_len = 0
 
         for idx, (input, output) in enumerate(zip(input_ids, output_ids)):
             num_special_tokens = 0
             if not unidirectional_attention:
-                if (
-                    idx == 0
-                    or not new_conversation_offset
-                    or (new_conversation_offset and idx in new_conversation_offset)
-                ):
+                if idx in new_conversation_offset:
                     # cls and gmask
                     num_special_tokens += 2
                 else:
@@ -555,34 +576,38 @@ class BailingTokenizer(PreTrainedTokenizerFast):
 
             # truncate
             if len(input) + len(output) + current_len > max_length - num_special_tokens:
+                if not use_packed or use_fa2 and unidirectional_attention:
+                    attention_mask = torch.tensor(0)
+                elif use_fa2:
+                    attention_mask = -1 * torch.ones([2, max_length])
+                else:
+                    attention_mask = torch.tril(torch.ones([max_length, max_length]))
+                # 返回一个空的样本，该样本不参与训练
+                default_return = {
+                    'input_ids': (torch.ones(max_length) * self.eos_token_id).long(),
+                    'position_ids': torch.zeros(2, max_length).long(),
+                    'attention_mask': (attention_mask.long()),
+                    'labels': (torch.ones(max_length) * -100).long(),
+                }
+                # 如果不截断，直接返回
+                if skip_truncated_turn:
+                    if current_len == 0:
+                        return default_return
+                    else:
+                        break
                 left_len = max_length - num_special_tokens - current_len
-                if len(input) > left_len // 2 and len(output) > left_len // 2:
-                    # 如果都超过了最大长度的一半,那都截取到最大长度的一半
+                # 如果截断，只截断prompt
+                if left_len - len(output) > 0:
                     if left_truncate:
-                        input = input[-left_len // 2 :]
+                        input = input[-(left_len - len(output)) :]
                     else:
-                        input = input[: left_len // 2]
-                    output = output[: left_len // 2]
+                        input = input[: left_len - len(output)]
                 else:
-                    # 从input_ids和output_ids中比较长的那一个截断,input_ids可以选择从左边或右边阶段,output_ids默认从右边截断
-                    if len(input) >= len(output):
-                        if left_truncate:
-                            input = input[-(left_len - len(output)) :]
-                        else:
-                            input = input[: left_len - len(output)]
+                    # response超过left_len，直接返回
+                    if current_len == 0:
+                        return default_return
                     else:
-                        output = output[: left_len - len(input)]
-                if unidirectional_attention:
-                    packed_input_ids.append(list(input))
-                else:
-                    if num_special_tokens == 4:
-                        packed_input_ids.append([self.cls_token_id] + list(input) + [self.gmask_token_id])
-                    else:
-                        packed_input_ids.append(list(input) + [self.gmask_token_id])
-
-                packed_output_ids.append(list(output) + [self.eos_token_id])
-                current_len += len(input) + len(output) + num_special_tokens
-                break
+                        break
             if unidirectional_attention:
                 packed_input_ids.append(list(input))
             else:
@@ -614,7 +639,6 @@ class BailingTokenizer(PreTrainedTokenizerFast):
             input_length_list = []
             position_id_list = []
             block_position_id_list = []
-
             for input, output in zip(packed_input_ids, packed_output_ids):
                 if self.add_bos_token:
                     data = input + [self.sop_token_id] + output
@@ -622,13 +646,14 @@ class BailingTokenizer(PreTrainedTokenizerFast):
                 else:
                     data = input + output
                     mask_pos = len(input) - 2
-                if unidirectional_attention:
-                    attention_mask = build_mask_matrix(len(data), 0)
-                else:
-                    attention_mask = build_mask_matrix(len(data), len(input))
-                attention_mask = attention_mask.squeeze((0, 1))
+                if return_attention_mask:
+                    if unidirectional_attention:
+                        attention_mask = build_mask_matrix(len(data), 0)
+                    else:
+                        attention_mask = build_mask_matrix(len(data), len(input))
+                    attention_mask = attention_mask.squeeze((0, 1))
 
-                attention_mask_list.append(attention_mask)
+                    attention_mask_list.append(attention_mask)
                 input_length_list.append(len(input))
                 tokens += data
 
@@ -657,8 +682,8 @@ class BailingTokenizer(PreTrainedTokenizerFast):
             pack_block_position_ids = []
             total_len = 0
             max_index = 0
-            for i in range(len(attention_mask_list)):
-                attention_mask = attention_mask_list[i]
+            for i in range(len(position_id_list)):
+
                 if use_fa2:
                     pack_attention_mask[0][i] = total_len
                     pack_attention_mask[1][i] = total_len + input_length_list[i]
@@ -673,17 +698,23 @@ class BailingTokenizer(PreTrainedTokenizerFast):
                 pack_block_position_ids.extend(block_position_ids)
                 if not isolation_position_ids:
                     max_index = pack_position_ids[-1] + 1
-                total_len += len(attention_mask_list[i])
+                total_len += len(position_id_list[i])
             position_ids = [pack_position_ids, pack_block_position_ids]
         else:
             # 单输入模式
-            input, output = packed_input_ids[0], packed_output_ids[0]
+            # 真多轮下，一条样本可能会有好几轮对话，此时需要获取第一条样本的结束位置
+            if len(new_conversation_offset) > 1:
+                end_idx = new_conversation_offset[1]
+            else:
+                end_idx = 1
+            input, output = list(itertools.chain(*packed_input_ids[:end_idx])), list(
+                itertools.chain(*packed_output_ids[:end_idx])
+            )
             if self.add_bos_token:
                 tokens = input + [self.sop_token_id] + output
             else:
                 tokens = input + output
 
-            attention_mask = len(input)
             if self.add_bos_token:
                 labels = [-100] * len(input) + output + [-100]
                 position_ids = self._build_position_ids(
@@ -697,8 +728,8 @@ class BailingTokenizer(PreTrainedTokenizerFast):
                     max_output_length=len(output),
                     rotary_type=rotary_type,
                 )
-
-        assert len(tokens) == current_len
+            attention_mask = len(input)
+        assert current_len == len(tokens)
 
         # 最大长度补全
         if max_length > 0 and len(tokens) < max_length and padding:
@@ -724,7 +755,7 @@ class BailingTokenizer(PreTrainedTokenizerFast):
 
         if use_fa2 and unidirectional_attention:
             # pack_attention_mask = torch.zeros([1], dtype=torch.long)
-            pack_attention_mask = 0
+            pack_attention_mask = torch.tensor(0)
 
         if use_packed:
             if not use_fa2:
@@ -733,6 +764,167 @@ class BailingTokenizer(PreTrainedTokenizerFast):
                 attention_mask = pack_attention_mask
         else:
             attention_mask = torch.tensor(attention_mask).long()
+        return {
+            'input_ids': torch.tensor(tokens).long(),
+            'position_ids': torch.tensor(position_ids).long(),
+            'attention_mask': attention_mask,
+            'labels': torch.tensor(labels).long(),
+        }
+
+    def _build_baichuan_inputs_for_train(
+        self,
+        inputs: Union[str, List[str]],
+        outputs: Union[str, List[str]],
+        new_conversation_offset: List[int] = None,
+        max_length: int = 2048,
+        rotary_type: str = "1d",
+        left_truncate: bool = True,
+        skip_truncated_turn: bool = True,
+        use_fa2: bool = True,
+        padding: bool = True,
+    ):
+        '''
+        input:  <role> HUMAN </role> u1 <role>  ASSISTANT </role> a11 a12            <role> HUMAN </role> u2 <role> ASSISTANT </role> a21 a22           <|endoftext|> <role> HUMAN </role> u1 <role>  ASSISTANT </role> a11 a12            <role> HUMAN </role> u2 <role> ASSISTANT </role> a21 a22           <|endoftext|>
+        output: x      x     x       x  x       x         a11     a12 <|endoftext|>  x      x     x       x  x      x         a21     a22 <|endoftext|> x             x      x     x       x  x       x         a11     a12 <|endoftext|>  x      x     x       x  x      x         a21     a22 <|endoftext|> x
+        只适用真多轮+pack数据训练单向模型，需要打开use_true_multiturn
+        '''
+        if isinstance(inputs, str):
+            inputs = [inputs]
+        if isinstance(outputs, str):
+            outputs = [outputs]
+        assert len(inputs) == len(outputs)
+
+        input_ids = [self(item)['input_ids'] for item in inputs]
+        output_ids = [self(item)['input_ids'] for item in outputs]
+
+        packed_input_ids = []
+        packed_output_ids = []
+
+        if new_conversation_offset is None:
+            new_conversation_offset = list(range(0, len(inputs)))
+        assert 0 in new_conversation_offset, f"没有0，请检查new_conversation_offset: {new_conversation_offset}"
+        current_len = 0
+
+        for idx, (input, output) in enumerate(zip(input_ids, output_ids)):
+            num_special_tokens = 0
+            if idx != 0 and idx in new_conversation_offset:
+                # 在input_ids加入eos，只有第0条样本不加
+                num_special_tokens += 1
+
+            # truncate
+            if len(input) + len(output) + current_len > max_length - num_special_tokens:
+                if use_fa2:
+                    attention_mask = torch.tensor(0)
+                else:
+                    attention_mask = torch.tril(torch.ones([max_length, max_length]))
+                # 返回一个空的样本，该样本不参与训练
+                default_return = {
+                    'input_ids': (torch.ones(max_length) * self.eos_token_id).long(),
+                    'position_ids': torch.zeros(2, max_length).long(),
+                    'attention_mask': (attention_mask.long()),
+                    'labels': (torch.ones(max_length) * -100).long(),
+                }
+
+                # 如果不截断，直接返回
+                if skip_truncated_turn:
+                    if current_len == 0:
+                        return default_return
+                    else:
+                        break
+                left_len = max_length - num_special_tokens - current_len
+                # 如果截断，只截断prompt
+                if left_len - len(output) > 0:
+                    if left_truncate:
+                        input = input[-(left_len - len(output)) :]
+                    else:
+                        input = input[: left_len - len(output)]
+                else:
+                    # response超过left_len，直接返回
+                    if current_len == 0:
+                        return default_return
+                    else:
+                        break
+            # 这里拼的是input_ids
+            if num_special_tokens == 1:
+                packed_input_ids.append([self.eos_token_id] + list(input))
+            else:
+                packed_input_ids.append(list(input))
+            packed_output_ids.append(list(output))
+            current_len += len(input) + len(output) + num_special_tokens
+        assert current_len <= max_length
+
+        def build_mask_matrix(seq_length, sep):
+            # https://github.com/pytorch/pytorch/issues/101932, fix triu/tril bf16 support
+            m = torch.ones((1, seq_length, seq_length))
+            mask = torch.arange(1, m.shape[-1] + 1).reshape(1, -1, 1).to(m.device)
+            ids = torch.arange(1, m.shape[-1] + 1).reshape(1, 1, -1).expand(1, m.shape[-1], -1).to(m.device)
+            m = (ids <= mask).type_as(m)
+
+            m[0, :, : int(sep)] = 1
+            m = m.squeeze(0)
+            return m
+
+        tokens = []
+        attention_mask_list = []
+        position_id_list = []
+        block_position_id_list = []
+        token_lens = []
+        for input, output in zip(packed_input_ids, packed_output_ids):
+            data = input + output
+            if not use_fa2:
+                attention_mask = build_mask_matrix(len(data), 0)
+                attention_mask_list.append(attention_mask)
+            tokens += data
+            token_lens.append(len(data))
+
+            position_ids, block_position_ids = self._build_position_ids(
+                mask_pos=len(input) - 2, bos_pos=len(input) - 1, max_output_length=len(output), rotary_type=rotary_type
+            )
+
+            position_id_list.append(position_ids)
+            block_position_id_list.append(block_position_ids)
+
+        labels = []
+        for i in range(len(packed_input_ids)):
+            labels += [-100] * (len(packed_input_ids[i]) - 1) + packed_output_ids[i] + [self.eos_token_id]
+
+        total_len = 0
+        if use_fa2:
+            pack_attention_mask = torch.Tensor([[0], [1]])
+        else:
+            pack_attention_mask = torch.tril(torch.ones([max_length, max_length]))
+
+        pack_position_ids = []
+        pack_block_position_ids = []
+        total_len = 0
+        max_index = 0
+        for i in range(len(token_lens)):
+            if not use_fa2:
+                attention_mask = attention_mask_list[i]
+                pack_attention_mask[
+                    total_len : total_len + attention_mask.shape[0], total_len : total_len + attention_mask.shape[0]
+                ] = attention_mask
+            position_ids = [pid + max_index for pid in position_id_list[i]]
+            block_position_ids = block_position_id_list[i]
+            pack_position_ids.extend(position_ids)
+            pack_block_position_ids.extend(block_position_ids)
+            max_index = pack_position_ids[-1] + 1
+            total_len += token_lens[i]
+        position_ids = [pack_position_ids, pack_block_position_ids]
+
+        if max_length > 0 and len(tokens) < max_length and padding:
+            pad_length = max_length - len(tokens)
+            tokens += [self.pad_token_id] * pad_length
+            labels.extend([-100] * pad_length)
+            position_ids[0] += [0] * pad_length
+            position_ids[1] += [0] * pad_length
+
+        assert len(tokens) == len(labels)
+
+        if not use_fa2:
+            attention_mask = pack_attention_mask.unsqueeze(0).long()
+        else:
+            attention_mask = torch.tensor(0)
         return {
             'input_ids': torch.tensor(tokens).long(),
             'position_ids': torch.tensor(position_ids).long(),
@@ -755,6 +947,9 @@ class BailingTokenizer(PreTrainedTokenizerFast):
         padding: bool = True,
         use_fa2: bool = True,
         use_packed: bool = True,
+        use_baichuan_packed: bool = False,
+        skip_truncated_turn: bool = False,
+        return_attention_mask: bool = True,
     ):
         r"""
         Build tensor input for model training. If inputs and outputs are list, will pack them.
@@ -802,6 +997,9 @@ class BailingTokenizer(PreTrainedTokenizerFast):
                 padding=padding,
                 use_fa2=use_fa2,
                 use_packed=use_packed,
+                use_baichuan_packed=use_baichuan_packed,
+                skip_truncated_turn=skip_truncated_turn,
+                return_attention_mask=return_attention_mask,
             )
         elif isinstance(data, Dict):
             if 'messages' in data:
@@ -831,6 +1029,9 @@ class BailingTokenizer(PreTrainedTokenizerFast):
                     padding=padding,
                     use_fa2=use_fa2,
                     use_packed=use_packed,
+                    use_baichuan_packed=use_baichuan_packed,
+                    skip_truncated_turn=skip_truncated_turn,
+                    return_attention_mask=return_attention_mask,
                 )
             else:
                 inputs = data['input']
@@ -861,5 +1062,7 @@ class BailingTokenizer(PreTrainedTokenizerFast):
                     padding=padding,
                     use_fa2=use_fa2,
                     use_packed=use_packed,
+                    use_baichuan_packed=use_baichuan_packed,
+                    skip_truncated_turn=skip_truncated_turn,
+                    return_attention_mask=return_attention_mask,
                 )
-

@@ -1,11 +1,16 @@
 {
   "additional_special_tokens": [
-    "<role>",
-    "</role>",
-    "<|arithmetic_start|>",
     "<|arithmetic_end|>",
+    "<role>",
+    "<|number_end|>",
+    "<|arithmetic_start|>",
+    "</role>",
     "<|number_start|>",
-    "<|number_end|>"
+    "<|role_end|>",
+    "<tool_call>",
+    "</tool_call>",
+    "<tool_response>",
+    "</tool_response>"
   ],
   "bos_token": {
     "content": "<|startoftext|>",
@@ -22,7 +27,7 @@
     "single_word": false
   },
   "eos_token": {
-    "content": "<|endoftext|>",
+    "content": "<|role_end|>",
     "lstrip": false,
     "normalized": false,
     "rstrip": false,
@@ -35,11 +40,5 @@
     "rstrip": false,
     "single_word": false
   },
-  "pad_token": {
-    "content": "<|endoftext|>",
-    "lstrip": false,
-    "normalized": false,
-    "rstrip": false,
-    "single_word": false
-  }
+  "pad_token": "<|role_end|>"
 }

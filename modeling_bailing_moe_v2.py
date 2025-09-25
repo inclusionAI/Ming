@@ -17,9 +17,10 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" PyTorch BailingMoE model."""
+"""PyTorch BailingMoE model."""
 import math
 import warnings
+import os
 from typing import List, Optional, Tuple, Union
 
 import torch
@@ -27,7 +28,7 @@ import torch.nn.functional as F
 import torch.utils.checkpoint
 from torch import nn
 from torch.nn import CrossEntropyLoss
-
+import transformer_engine.pytorch as te
 from transformers.activations import ACT2FN
 from transformers.cache_utils import Cache, DynamicCache
 from transformers.modeling_attn_mask_utils import (
@@ -37,15 +38,12 @@ from transformers.modeling_attn_mask_utils import (
     _prepare_4d_causal_attention_mask_for_sdpa,
 )
 from transformers.modeling_outputs import (
-    MoeCausalLMOutputWithPast,
     MoeModelOutputWithPast,
+    MoeCausalLMOutputWithPast,
 )
+from transformers.modeling_rope_utils import ROPE_INIT_FUNCTIONS, dynamic_rope_update
 from transformers.modeling_utils import PreTrainedModel
-from transformers.generation import GenerationMixin
-from transformers.pytorch_utils import (
-    ALL_LAYERNORM_LAYERS,
-    is_torch_greater_or_equal_than_1_13,
-)
+from transformers.pytorch_utils import ALL_LAYERNORM_LAYERS, is_torch_greater_or_equal_than_1_13
 from transformers.utils import (
     add_start_docstrings,
     add_start_docstrings_to_model_forward,
@@ -55,8 +53,11 @@ from transformers.utils import (
     replace_return_docstrings,
 )
 from transformers.utils.import_utils import is_torch_fx_available
+from configuration_bailing_moe_v2 import BailingMoeV2Config
+from transformers.generation.utils import GenerationMixin
+from modeling_utils import patch_continuous_features, build_modality_mask
 
-from configuration_bailing_moe import BailingMoeConfig
+
 
 if is_flash_attn_2_available():
     from flash_attn import flash_attn_func, flash_attn_varlen_func
@@ -74,7 +75,7 @@ if is_torch_fx_available():
 
 logger = logging.get_logger(__name__)
 
-_CONFIG_FOR_DOC = "BailingMoeConfig"
+_CONFIG_FOR_DOC = "BailingMoeV2Config"
 
 
 def _get_unpad_data(attention_mask):
@@ -91,7 +92,7 @@ def _get_unpad_data(attention_mask):
 
 def _expand_mask(mask: torch.Tensor, dtype: torch.dtype, tgt_len: Optional[int] = None):
     warnings.warn(
-        "Calling `transformers.models.BailingMoe.modeling_BailingMoe._prepare_4d_attention_mask` is deprecated and will be removed in v4.37. Use `transformers.modeling_attn_mask_utils._prepare_4d_attention_mask"
+        "Calling `transformers.models.BailingMoeV2.modeling_BailingMoeV2._prepare_4d_attention_mask` is deprecated and will be removed in v4.37. Use `transformers.modeling_attn_mask_utils._prepare_4d_attention_mask"
     )
     return _prepare_4d_attention_mask(mask=mask, dtype=dtype, tgt_len=tgt_len)
 
@@ -100,17 +101,17 @@ def _make_causal_mask(
     input_ids_shape: torch.Size, dtype: torch.dtype, device: torch.device, past_key_values_length: int = 0
 ):
     warnings.warn(
-        "Calling `transformers.models.BailingMoe.modeling_BailingMoe._make_causal_mask` is deprecated and will be removed in v4.37. Use `transformers.models.BailingMoe.modeling_BailingMoe.AttentionMaskConverter._make_causal_mask"
+        "Calling `transformers.models.BailingMoeV2.modeling_BailingMoeV2._make_causal_mask` is deprecated and will be removed in v4.37. Use `transformers.models.BailingMoeV2.modeling_BailingMoeV2.AttentionMaskConverter._make_causal_mask"
     )
     return AttentionMaskConverter._make_causal_mask(
         input_ids_shape=input_ids_shape, dtype=dtype, device=device, past_key_values_length=past_key_values_length
     )
 
 
-class BailingMoeRMSNorm(nn.Module):
+class BailingMoeV2RMSNorm(nn.Module):
     def __init__(self, hidden_size, eps=1e-6):
         """
-        BailingMoeRMSNorm is equivalent to T5LayerNorm
+        BailingMoeV2RMSNorm is equivalent to T5LayerNorm
         """
         super().__init__()
         self.weight = nn.Parameter(torch.ones(hidden_size))
@@ -121,193 +122,85 @@ class BailingMoeRMSNorm(nn.Module):
         hidden_states = hidden_states.to(torch.float32)
         variance = hidden_states.pow(2).mean(-1, keepdim=True)
         hidden_states = hidden_states * torch.rsqrt(variance + self.variance_epsilon)
-        return (self.weight * hidden_states).to(input_dtype)
+        return self.weight * hidden_states.to(input_dtype)
 
 
-ALL_LAYERNORM_LAYERS.append(BailingMoeRMSNorm)
+ALL_LAYERNORM_LAYERS.append(BailingMoeV2RMSNorm)
 
 
-class BailingMoeRotaryEmbedding(nn.Module):
-    def __init__(self, dim, max_position_embeddings=2048, base=10000, device=None):
+class BailingMoeV2RotaryEmbedding(nn.Module):
+    def __init__(self, config: BailingMoeV2Config, device=None):
         super().__init__()
+        # BC: "rope_type" was originally "type"
+        if hasattr(config, "rope_scaling") and config.rope_scaling is not None:
+            self.rope_type = config.rope_scaling.get("rope_type", config.rope_scaling.get("type"))
+        else:
+            self.rope_type = "default"
+        self.max_seq_len_cached = config.max_position_embeddings
+        self.original_max_seq_len = config.max_position_embeddings
 
-        self.dim = dim
-        self.max_position_embeddings = max_position_embeddings
-        self.base = base
-        inv_freq = 1.0 / (self.base ** (torch.arange(0, self.dim, 2).float().to(device) / self.dim))
+        self.config = config
+        self.rope_init_fn = ROPE_INIT_FUNCTIONS[self.rope_type]
+
+        inv_freq, self.attention_scaling = self.rope_init_fn(self.config, device)
         self.register_buffer("inv_freq", inv_freq, persistent=False)
+        self.original_inv_freq = self.inv_freq
 
-        # Build here to make `torch.jit.trace` work.
-        self._set_cos_sin_cache(
-            seq_len=max_position_embeddings, device=self.inv_freq.device, dtype=torch.get_default_dtype()
-        )
-        self.max_seq_len_cached = None
-
-    def _set_cos_sin_cache(self, seq_len, device, dtype):
-        self.max_seq_len_cached = seq_len
-        t = torch.arange(self.max_seq_len_cached, device=device, dtype=self.inv_freq.dtype)
-
-        freqs = torch.outer(t, self.inv_freq.to(t.device))
-        # Different from paper, but it uses a different permutation in order to obtain the same calculation
-        emb = torch.cat((freqs, freqs), dim=-1)
-        self.register_buffer("cos_cached", emb.cos().to(dtype), persistent=False)
-        self.register_buffer("sin_cached", emb.sin().to(dtype), persistent=False)
-
-    def forward(self, x, seq_len=None):
-        # x: [bs, num_attention_heads, seq_len, head_size]
-        if self.max_seq_len_cached is None or seq_len > self.max_seq_len_cached:
-            self._set_cos_sin_cache(seq_len=seq_len, device=x.device, dtype=x.dtype)
-
-        return (
-            self.cos_cached[:seq_len].to(dtype=x.dtype),
-            self.sin_cached[:seq_len].to(dtype=x.dtype),
-        )
-
-
-# Copied from transformers.models.llama.modeling_llama.LlamaLinearScalingRotaryEmbedding with Llama->BailingMoe
-class BailingMoeLinearScalingRotaryEmbedding(BailingMoeRotaryEmbedding):
-    """BailingMoeRotaryEmbedding extended with linear scaling. Credits to the Reddit user /u/kaiokendev"""
-
-    def __init__(self, dim, max_position_embeddings=2048, base=10000, device=None, scaling_factor=1.0):
-        self.scaling_factor = scaling_factor
-        super().__init__(dim, max_position_embeddings, base, device)
-
-    def _set_cos_sin_cache(self, seq_len, device, dtype):
-        self.max_seq_len_cached = seq_len
-        t = torch.arange(self.max_seq_len_cached, device=device, dtype=self.inv_freq.dtype)
-        t = t / self.scaling_factor
-
-        freqs = torch.outer(t, self.inv_freq)
-        # Different from paper, but it uses a different permutation in order to obtain the same calculation
-        emb = torch.cat((freqs, freqs), dim=-1)
-        self.register_buffer("cos_cached", emb.cos().to(dtype), persistent=False)
-        self.register_buffer("sin_cached", emb.sin().to(dtype), persistent=False)
-
-
-# Copied from transformers.models.llama.modeling_llama.LlamaDynamicNTKScalingRotaryEmbedding with Llama->BailingMoe
-class BailingMoeDynamicNTKScalingRotaryEmbedding(BailingMoeRotaryEmbedding):
-    """BailingMoeRotaryEmbedding extended with Dynamic NTK scaling. Credits to the Reddit users /u/bloc97 and /u/emozilla"""
-
-    def __init__(self, dim, max_position_embeddings=2048, base=10000, device=None, scaling_factor=1.0):
-        self.scaling_factor = scaling_factor
-        super().__init__(dim, max_position_embeddings, base, device)
-
-    def _set_cos_sin_cache(self, seq_len, device, dtype):
-        self.max_seq_len_cached = seq_len
-
-        if seq_len > self.max_position_embeddings:
-            base = self.base * (
-                (self.scaling_factor * seq_len / self.max_position_embeddings) - (self.scaling_factor - 1)
-            ) ** (self.dim / (self.dim - 2))
-            inv_freq = 1.0 / (base ** (torch.arange(0, self.dim, 2).float().to(device) / self.dim))
-            self.register_buffer("inv_freq", inv_freq, persistent=False)
-
-        t = torch.arange(self.max_seq_len_cached, device=device, dtype=self.inv_freq.dtype)
-
-        freqs = torch.outer(t, self.inv_freq)
-        # Different from paper, but it uses a different permutation in order to obtain the same calculation
-        emb = torch.cat((freqs, freqs), dim=-1)
-        self.register_buffer("cos_cached", emb.cos().to(dtype), persistent=False)
-        self.register_buffer("sin_cached", emb.sin().to(dtype), persistent=False)
-
-
-# Inverse dim formula to find dim based on number of rotations
-def yarn_find_correction_dim(num_rotations, dim, base=10000, max_position_embeddings=2048):
-    return (dim * math.log(max_position_embeddings / (num_rotations * 2 * math.pi))) / (2 * math.log(base))
-
-
-# Find dim range bounds based on rotations
-def yarn_find_correction_range(low_rot, high_rot, dim, base=10000, max_position_embeddings=2048):
-    low = math.floor(yarn_find_correction_dim(low_rot, dim, base, max_position_embeddings))
-    high = math.ceil(yarn_find_correction_dim(high_rot, dim, base, max_position_embeddings))
-    return max(low, 0), min(high, dim - 1)  # Clamp values just in case
-
-
-def yarn_get_mscale(scale=1, mscale=1):
-    if scale <= 1:
-        return 1.0
-    return 0.1 * mscale * math.log(scale) + 1.0
-
-
-def yarn_linear_ramp_mask(min, max, dim):
-    if min == max:
-        max += 0.001  # Prevent singularity
-
-    linear_func = (torch.arange(dim, dtype=torch.float32) - min) / (max - min)
-    ramp_func = torch.clamp(linear_func, 0, 1)
-    return ramp_func
-
-
-class BailingMoeYarnRotaryEmbedding(BailingMoeRotaryEmbedding):
-
-    def __init__(
-        self,
-        dim,
-        max_position_embeddings=2048,
-        base=10000,
-        device=None,
-        scaling_factor=1.0,
-        original_max_position_embeddings=4096,
-        beta_fast=32,
-        beta_slow=1,
-        mscale=1,
-        mscale_all_dim=0,
-    ):
-        self.scaling_factor = scaling_factor
-        self.original_max_position_embeddings = original_max_position_embeddings
-        self.beta_fast = beta_fast
-        self.beta_slow = beta_slow
-        self.mscale = mscale
-        self.mscale_all_dim = mscale_all_dim
-        super().__init__(dim, max_position_embeddings, base, device)
-
-    def _set_cos_sin_cache(self, seq_len, device, dtype):
-        self.max_seq_len_cached = seq_len
-        dim = self.dim
-
-        freq_extra = 1.0 / (self.base ** (torch.arange(0, dim, 2, dtype=torch.float32, device=device) / dim))
-        freq_inter = 1.0 / (
-            self.scaling_factor * self.base ** (torch.arange(0, dim, 2, dtype=torch.float32, device=device) / dim)
-        )
-
-        low, high = yarn_find_correction_range(
-            self.beta_fast,
-            self.beta_slow,
-            dim,
-            self.base,
-            self.original_max_position_embeddings,
-        )
-        inv_freq_mask = 1.0 - yarn_linear_ramp_mask(low, high, dim // 2).to(device=device, dtype=torch.float32)
-        inv_freq = freq_inter * (1 - inv_freq_mask) + freq_extra * inv_freq_mask
-        self.register_buffer("inv_freq", inv_freq, persistent=False)
-
-        t = torch.arange(seq_len, device=device, dtype=torch.float32)
-
-        freqs = torch.outer(t, inv_freq)
-
-        _mscale = float(
-            yarn_get_mscale(self.scaling_factor, self.mscale)
-            / yarn_get_mscale(self.scaling_factor, self.mscale_all_dim)
-        )
-
-        emb = torch.cat((freqs, freqs), dim=-1)
-        self.register_buffer("cos_cached", (emb.cos() * _mscale).to(dtype), persistent=False)
-        self.register_buffer("sin_cached", (emb.sin() * _mscale).to(dtype), persistent=False)
-
-
-class BailingMoe3DRotaryEmbedding(BailingMoeRotaryEmbedding):
+    @torch.no_grad()
+    @dynamic_rope_update  # power user: used with advanced RoPE types (e.g. dynamic rope)
     def forward(self, x, position_ids):
-        inv_freq = 1.0 / (self.base ** (torch.arange(0, self.dim, 2).float() / self.dim))
-        inv_freq_expand = inv_freq[None, None, :, None].expand(3, 1, -1, 1)
-        position_ids_expand = position_ids[:, :, None, :].float()
+        position_ids = position_ids[:, 0, :] 
+        inv_freq_expanded = self.inv_freq[None, :, None].float().expand(position_ids.shape[0], -1, 1).to(x.device)
+        position_ids_expanded = position_ids[:, None, :].float()
 
-        with torch.autocast(device_type=x.device.type, enabled=False):
-            freqs = (inv_freq_expand.to(x.device).float() @ position_ids_expand.to(x.device).float()).transpose(2, 3)
-            assert freqs.dtype == torch.float32
+
+        device_type = x.device.type if isinstance(x.device.type, str) and x.device.type != "mps" else "cpu"
+        with torch.autocast(device_type=device_type, enabled=False):  # Force float32
+            freqs = (inv_freq_expanded.float() @ position_ids_expanded.float()).transpose(1, 2)
             emb = torch.cat((freqs, freqs), dim=-1)
-            cos_cached = emb.cos()
-            sin_cached = emb.sin()
-        return (cos_cached, sin_cached)
+            cos = emb.cos() * self.attention_scaling
+            sin = emb.sin() * self.attention_scaling
+
+        return cos.to(dtype=x.dtype), sin.to(dtype=x.dtype)
+    
+    
+class BailingMoeV2RotaryEmbedding3D(nn.Module):
+    def __init__(self, config: BailingMoeV2Config, device=None):
+        super().__init__()
+        # BC: "rope_type" was originally "type"
+        self.rope_init_type = "default"
+        self.rope_type = config.rope_scaling.get("rope_type", config.rope_scaling.get("type"))
+        self.max_seq_len_cached = config.max_position_embeddings
+        self.original_max_seq_len = config.max_position_embeddings
+
+        self.config = config
+        self.rope_init_fn = ROPE_INIT_FUNCTIONS[self.rope_init_type]
+
+        inv_freq, self.attention_scaling = self.rope_init_fn(self.config, device)
+        self.register_buffer("inv_freq", inv_freq, persistent=False)
+        self.original_inv_freq = self.inv_freq
+
+    @torch.no_grad()
+    @dynamic_rope_update  # power user: used with advanced RoPE types (e.g. dynamic rope)
+    def forward(self, x, position_ids):
+        if self.rope_type == "3D" or self.rope_type == "video_rope":
+            inv_freq_expanded = self.inv_freq[None, None, :, None].float().expand(3, position_ids.shape[1], -1, 1).to(x.device)
+            position_ids_expanded = position_ids[:, :, None, :].float()
+        else:
+            inv_freq_expanded = self.inv_freq[None, :, None].float().expand(position_ids.shape[0], -1, 1).to(x.device)
+            position_ids_expanded = position_ids[:, None, :].float()
+
+        device_type = x.device.type if isinstance(x.device.type, str) and x.device.type != "mps" else "cpu"
+        with torch.autocast(device_type=device_type, enabled=False):  # Force float32
+            if self.rope_type == "3D" or self.rope_type == "video_rope":
+                freqs = (inv_freq_expanded.float() @ position_ids_expanded.float()).transpose(2, 3)
+            else:
+                freqs = (inv_freq_expanded.float() @ position_ids_expanded.float()).transpose(1, 2)
+            emb = torch.cat((freqs, freqs), dim=-1)
+            cos = emb.cos() * self.attention_scaling
+            sin = emb.sin() * self.attention_scaling
+
+        return cos.to(dtype=x.dtype), sin.to(dtype=x.dtype)
 
 
 # Copied from transformers.models.llama.modeling_llama.rotate_half
@@ -318,43 +211,15 @@ def rotate_half(x):
     return torch.cat((-x2, x1), dim=-1)
 
 
-# Copied from transformers.models.llama.modeling_llama.apply_rotary_pos_emb
-def apply_rotary_pos_emb(q, k, cos, sin, position_ids, unsqueeze_dim=1):
-    """Applies Rotary Position Embedding to the query and key tensors.
-
-    Args:
-        q (`torch.Tensor`): The query tensor.
-        k (`torch.Tensor`): The key tensor.
-        cos (`torch.Tensor`): The cosine part of the rotary embedding.
-        sin (`torch.Tensor`): The sine part of the rotary embedding.
-        position_ids (`torch.Tensor`):
-            The position indices of the tokens corresponding to the query and key tensors. For example, this can be
-            used to pass offsetted position ids when working with a KV-cache.
-        unsqueeze_dim (`int`, *optional*, defaults to 1):
-            The 'unsqueeze_dim' argument specifies the dimension along which to unsqueeze cos[position_ids] and
-            sin[position_ids] so that they can be properly broadcasted to the dimensions of q and k. For example, note
-            that cos[position_ids] and sin[position_ids] have the shape [batch_size, seq_len, head_dim]. Then, if q and
-            k have the shape [batch_size, heads, seq_len, head_dim], then setting unsqueeze_dim=1 makes
-            cos[position_ids] and sin[position_ids] broadcastable to the shapes of q and k. Similarly, if q and k have
-            the shape [batch_size, seq_len, heads, head_dim], then set unsqueeze_dim=2.
-    Returns:
-        `tuple(torch.Tensor)` comprising the query and key tensors rotated using the Rotary Position Embedding.
-    """
-    cos = cos[position_ids].unsqueeze(unsqueeze_dim)
-    sin = sin[position_ids].unsqueeze(unsqueeze_dim)
-    q_embed = (q * cos) + (rotate_half(q) * sin)
-    k_embed = (k * cos) + (rotate_half(k) * sin)
-    return q_embed, k_embed
-
-def apply_multimodal_rotary_pos_emb(
+def apply_3d_rotary_pos_emb(
     q, 
     k, 
     cos, 
     sin, 
-    mrope_section=[16, 24, 24], 
+    mrope_section=[8, 12, 12], 
     unsqueeze_dim=1, 
     rope_type="m_rope", 
-    rotary_half=False
+    rotary_half=True
 ):
     """Applies Rotary Position Embedding with Multimodal Sections to the query and key tensors (https://qwenlm.github.io/blog/qwen2-vl/).
     Explanation:
@@ -389,12 +254,8 @@ def apply_multimodal_rotary_pos_emb(
 
     if rope_type == "m_rope":
         mrope_section = mrope_section * 2
-        cos = torch.cat([m[i % 3] for i, m in enumerate(cos.split(mrope_section, dim=-1))], dim=-1).unsqueeze(
-            unsqueeze_dim
-        )
-        sin = torch.cat([m[i % 3] for i, m in enumerate(sin.split(mrope_section, dim=-1))], dim=-1).unsqueeze(
-            unsqueeze_dim
-        )
+        cos = torch.cat([m[i % 3] for i, m in enumerate(cos.split(mrope_section, dim=-1))], dim=-1).unsqueeze(unsqueeze_dim).to(q.device)
+        sin = torch.cat([m[i % 3] for i, m in enumerate(sin.split(mrope_section, dim=-1))], dim=-1).unsqueeze(unsqueeze_dim).to(q.device)
     elif rope_type == "video_rope":
         mrope_section = list(mrope_section)
         mrope_section = [mrope_section[0], mrope_section[1] + mrope_section[2]]
@@ -416,11 +277,10 @@ def apply_multimodal_rotary_pos_emb(
                 result_cos.append(cos[0, ..., index:index + section])
                 result_sin.append(sin[0, ..., index:index + section])
                 index += section
-        cos, sin = torch.cat(result_cos, dim=-1).unsqueeze(dim=unsqueeze_dim), torch.cat(result_sin, dim=-1).unsqueeze(
-            dim=unsqueeze_dim)
+        cos, sin = torch.cat(result_cos, dim=-1).unsqueeze(dim=unsqueeze_dim).to(q.device), torch.cat(result_sin, dim=-1).unsqueeze(dim=unsqueeze_dim).to(q.device)
     else:  # vanilla rope for llm
-        cos = cos.unsqueeze(unsqueeze_dim)
-        sin = sin.unsqueeze(unsqueeze_dim)
+        cos = cos.unsqueeze(unsqueeze_dim).to(q.device)
+        sin = sin.unsqueeze(unsqueeze_dim).to(q.device)
 
     if rotary_half:
         rotary_dim = cos.shape[-1]
@@ -439,9 +299,340 @@ def apply_multimodal_rotary_pos_emb(
         k_embed = (k * cos) + (rotate_half(k) * sin)
     return q_embed, k_embed
 
+def get_t_scale_rope_index(
+    config,
+    input_ids: torch.LongTensor,
+    image_grid_thw: Optional[torch.LongTensor] = None,
+    video_grid_thw: Optional[torch.LongTensor] = None,
+    attention_mask: Optional[torch.Tensor] = None,
+    scale_factor: float = 1.0,
+    second_per_grid_ts: Optional[torch.Tensor] = None,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    spatial_merge_size = config.spatial_merge_size
+    image_token_id = config.image_patch_token
+    video_token_id = config.video_patch_token
+    image_start_token_id = config.image_start_token
+    video_start_token_id = config.video_start_token
+    use_abs_time_pos = second_per_grid_ts is not None
 
-class BailingMoeMLP(nn.Module):
-    def __init__(self, config: BailingMoeConfig, intermediate_size: int):
+    mrope_position_deltas = []
+    if image_grid_thw is not None or video_grid_thw is not None:
+        total_input_ids = input_ids
+        if attention_mask is None:
+            attention_mask = torch.ones_like(total_input_ids)
+        position_ids = torch.ones(
+            3,
+            input_ids.shape[0],
+            input_ids.shape[1],
+            dtype=input_ids.dtype,
+            device=input_ids.device,
+        )
+
+        image_index, video_index = 0, 0
+        attention_mask = attention_mask.to(total_input_ids.device)
+
+        for i, input_ids in enumerate(total_input_ids):
+            if attention_mask is not None:
+                input_ids = input_ids[attention_mask[i] == 1]
+            image_nums, video_nums = 0, 0
+            if image_grid_thw is not None:
+                vision_start_indices = torch.argwhere(input_ids == image_start_token_id).squeeze(1)
+                vision_tokens = input_ids[vision_start_indices + 1]
+                image_nums = (vision_tokens == image_token_id).sum()
+            if video_grid_thw is not None:
+                vision_start_indices = torch.argwhere(input_ids == video_start_token_id).squeeze(1)
+                vision_tokens = input_ids[vision_start_indices + 1]
+                video_nums = (vision_tokens == video_token_id).sum()
+
+            input_tokens = input_ids.tolist()
+            llm_pos_ids_list: list = []
+            st = 0
+            remain_images, remain_videos = image_nums, video_nums
+            for _ in range(image_nums + video_nums):
+                if image_token_id in input_tokens and remain_images > 0:
+                    ed_image = input_tokens.index(image_token_id, st)
+                else:
+                    ed_image = len(input_tokens) + 1
+                if video_token_id in input_tokens and remain_videos > 0:
+                    ed_video = input_tokens.index(video_token_id, st)
+                else:
+                    ed_video = len(input_tokens) + 1
+                if ed_image < ed_video:
+                    t, h, w = (
+                        image_grid_thw[image_index][0],
+                        image_grid_thw[image_index][1],
+                        image_grid_thw[image_index][2],
+                    )
+                    second_per_grid_t = 0
+                    image_index += 1
+                    remain_images -= 1
+                    ed = ed_image
+                else:
+                    t, h, w = (
+                        video_grid_thw[video_index][0],
+                        video_grid_thw[video_index][1],
+                        video_grid_thw[video_index][2],
+                    )
+                    if second_per_grid_ts is not None:
+                        second_per_grid_t = second_per_grid_ts[video_index]
+                    else:
+                        second_per_grid_t = 1.0
+                    video_index += 1
+                    remain_videos -= 1
+                    ed = ed_video
+                llm_grid_t, llm_grid_h, llm_grid_w = (
+                    t.item(),
+                    h.item() // spatial_merge_size,
+                    w.item() // spatial_merge_size,
+                )
+                text_len = ed - st
+
+                st_idx = llm_pos_ids_list[-1][0].max() + 1 if len(llm_pos_ids_list) > 0 else 0
+                llm_pos_ids_list.append(torch.arange(text_len).view(1, -1).expand(3, -1) + st_idx)
+
+                # body-diagonal symmetry
+                t_index = torch.arange(llm_grid_t).view(-1, 1).expand(
+                    -1, llm_grid_h * llm_grid_w).flatten()
+                h_index = torch.arange(llm_grid_h).view(1, -1, 1).expand(
+                    llm_grid_t, -1, llm_grid_w).flatten() - (llm_grid_h - 1) // 2
+                w_index = torch.arange(llm_grid_w).view(1, 1, -1).expand(
+                    llm_grid_t, llm_grid_h, -1).flatten() - (llm_grid_w - 1) // 2
+
+                # time dim adjust step size
+                if use_abs_time_pos:
+                    t_index = t_index * second_per_grid_t * scale_factor
+                else:
+                    t_index = t_index * scale_factor
+                t_index = t_index + text_len + st_idx
+
+                h_index = h_index + t_index
+                w_index = w_index + t_index
+                llm_pos_ids_list.append(
+                    torch.stack([t_index, h_index, w_index]))
+                st = ed + llm_grid_t * llm_grid_h * llm_grid_w
+
+            if st < len(input_tokens):
+                # next text token near last video token position = last t + 1
+                st_idx = llm_pos_ids_list[-1][0].max() + 1 if len(llm_pos_ids_list) > 0 else 0
+                text_len = len(input_tokens) - st
+                llm_pos_ids_list.append(torch.arange(text_len).view(1, -1).expand(3, -1) + st_idx)
+
+            llm_positions = torch.cat(llm_pos_ids_list, dim=1).reshape(3, -1)
+            llm_positions = llm_positions.to(dtype=position_ids.dtype, device=position_ids.device)
+            position_ids[..., i, attention_mask[i] == 1] = llm_positions
+            # generate first token = last t + 1
+            mrope_position_deltas.append(llm_positions[0].max() + 1 - len(total_input_ids[i]))
+        mrope_position_deltas = torch.tensor(mrope_position_deltas, device=input_ids.device).unsqueeze(1)
+    else:
+        if attention_mask is not None:
+            position_ids = attention_mask.long().cumsum(-1) - 1
+            position_ids.masked_fill_(attention_mask == 0, 1)
+            position_ids = position_ids.unsqueeze(0).expand(3, -1, -1).to(input_ids.device)
+            max_position_ids = position_ids.max(0, keepdim=False)[0].max(-1, keepdim=True)[0]
+            mrope_position_deltas = max_position_ids + 1 - attention_mask.shape[-1]
+        else:
+            position_ids = (
+                torch.arange(input_ids.shape[1], device=input_ids.device)
+                .view(1, 1, -1)
+                .expand(3, input_ids.shape[0], -1)
+            )
+            mrope_position_deltas = torch.zeros(
+                [input_ids.shape[0], 1],
+                device=input_ids.device,
+                dtype=input_ids.dtype,
+            )
+
+    return position_ids, mrope_position_deltas
+
+def get_rope_index(
+    config,
+    input_ids: Optional[torch.LongTensor] = None,
+    image_grid_thw: Optional[torch.LongTensor] = None,
+    video_grid_thw: Optional[torch.LongTensor] = None,
+    attention_mask: Optional[torch.Tensor] = None,
+    second_per_grid_ts: Optional[torch.Tensor] = None,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Calculate the 3D rope index based on image and video's temporal, height and width in LLM.
+
+        Explanation:
+            Each embedding sequence contains vision embedding and text embedding or just contains text embedding.
+
+            For pure text embedding sequence, the rotary position embedding has no difference with modern LLMs.
+            Examples:
+                input_ids: [T T T T T], here T is for text.
+                temporal position_ids: [0, 1, 2, 3, 4]
+                height position_ids: [0, 1, 2, 3, 4]
+                width position_ids: [0, 1, 2, 3, 4]
+
+            For vision and text embedding sequence, we calculate 3D rotary position embedding for vision part
+            and 1D rotary position embeddin for text part.
+            Examples:
+                Temporal (Time): 3 patches, representing different segments of the video in time.
+                Height: 2 patches, dividing each frame vertically.
+                Width: 2 patches, dividing each frame horizontally.
+                We also have some important parameters:
+                fps (Frames Per Second): The video's frame rate, set to 1. This means one frame is processed each second.
+                tokens_per_second: This is a crucial parameter. It dictates how many "time-steps" or "temporal tokens" are conceptually packed into a one-second interval of the video. In this case, we have 25 tokens per second. So each second of the video will be represented with 25 separate time points. It essentially defines the temporal granularity.
+                temporal_patch_size: The number of frames that compose one temporal patch. Here, it's 2 frames.
+                interval: The step size for the temporal position IDs, calculated as tokens_per_second * temporal_patch_size / fps. In this case, 25 * 2 / 1 = 50. This means that each temporal patch will be have a difference of 50 in the temporal position IDs.
+                input_ids: [V V V V V V V V V V V V T T T T T], here V is for vision.
+                vision temporal position_ids: [0, 0, 0, 0, 50, 50, 50, 50, 100, 100, 100, 100]
+                vision height position_ids: [0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1]
+                vision width position_ids: [0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1]
+                text temporal position_ids: [101, 102, 103, 104, 105]
+                text height position_ids: [101, 102, 103, 104, 105]
+                text width position_ids: [101, 102, 103, 104, 105]
+                Here we calculate the text start position_ids as the max vision position_ids plus 1.
+
+        Args:
+            input_ids (`torch.LongTensor` of shape `(batch_size, sequence_length)`):
+                Indices of input sequence tokens in the vocabulary. Padding will be ignored by default should you provide
+                it.
+            image_grid_thw (`torch.LongTensor` of shape `(num_images, 3)`, *optional*):
+                The temporal, height and width of feature shape of each image in LLM.
+            video_grid_thw (`torch.LongTensor` of shape `(num_videos, 3)`, *optional*):
+                The temporal, height and width of feature shape of each video in LLM.
+            second_per_grid_ts (`torch.Tensor` of shape `(num_videos)`, *optional*):
+                The time interval (in seconds) for each grid along the temporal dimension in the 3D position IDs.
+            attention_mask (`torch.Tensor` of shape `(batch_size, sequence_length)`, *optional*):
+                Mask to avoid performing attention on padding token indices. Mask values selected in `[0, 1]`:
+
+                - 1 for tokens that are **not masked**,
+                - 0 for tokens that are **masked**.
+
+        Returns:
+            position_ids (`torch.LongTensor` of shape `(3, batch_size, sequence_length)`)
+            mrope_position_deltas (`torch.Tensor` of shape `(batch_size)`)
+        """
+        spatial_merge_size = config.spatial_merge_size
+        image_token_id = config.image_patch_token
+        video_token_id = config.video_patch_token
+        image_start_token_id = config.image_start_token
+        video_start_token_id = config.video_start_token
+
+        use_abs_time_pos = second_per_grid_ts is not None
+
+        mrope_position_deltas = []
+        if image_grid_thw is not None or video_grid_thw is not None:
+            total_input_ids = input_ids
+            if attention_mask is None:
+                attention_mask = torch.ones_like(total_input_ids)
+            position_ids = torch.ones(
+                3,
+                input_ids.shape[0],
+                input_ids.shape[1],
+                dtype=input_ids.dtype,
+                device=input_ids.device,
+            )
+            image_index, video_index = 0, 0
+            attention_mask = attention_mask.to(total_input_ids.device)
+            for i, input_ids in enumerate(total_input_ids):
+                input_ids = input_ids[attention_mask[i] == 1]
+                image_nums, video_nums = 0, 0
+                if image_grid_thw is not None:
+                    vision_start_indices = torch.argwhere(input_ids == image_start_token_id).squeeze(1)
+                    vision_tokens = input_ids[vision_start_indices + 1]
+                    image_nums = (vision_tokens == image_token_id).sum()
+                if video_grid_thw is not None:
+                    vision_start_indices = torch.argwhere(input_ids == video_start_token_id).squeeze(1)
+                    vision_tokens = input_ids[vision_start_indices + 1]
+                    video_nums = (vision_tokens == video_token_id).sum()
+
+                input_tokens = input_ids.tolist()
+                llm_pos_ids_list: list = []
+                st = 0
+                remain_images, remain_videos = image_nums, video_nums
+                for _ in range(image_nums + video_nums):
+                    if image_token_id in input_tokens and remain_images > 0:
+                        ed_image = input_tokens.index(image_token_id, st)
+                    else:
+                        ed_image = len(input_tokens) + 1
+                    if video_token_id in input_tokens and remain_videos > 0:
+                        ed_video = input_tokens.index(video_token_id, st)
+                    else:
+                        ed_video = len(input_tokens) + 1
+                    if ed_image < ed_video:
+                        t, h, w = (
+                            image_grid_thw[image_index][0],
+                            image_grid_thw[image_index][1],
+                            image_grid_thw[image_index][2],
+                        )
+                        second_per_grid_t = 0
+                        image_index += 1
+                        remain_images -= 1
+                        ed = ed_image
+
+                    else:
+                        t, h, w = (
+                            video_grid_thw[video_index][0],
+                            video_grid_thw[video_index][1],
+                            video_grid_thw[video_index][2],
+                        )
+                        if second_per_grid_ts is not None:
+                            second_per_grid_t = second_per_grid_ts[video_index]
+                        else:
+                            second_per_grid_t = 1.0
+                        video_index += 1
+                        remain_videos -= 1
+                        ed = ed_video
+                    llm_grid_t, llm_grid_h, llm_grid_w = (
+                        t.item(),
+                        h.item() // spatial_merge_size,
+                        w.item() // spatial_merge_size,
+                    )
+                    text_len = ed - st
+
+                    st_idx = llm_pos_ids_list[-1].max() + 1 if len(llm_pos_ids_list) > 0 else 0
+                    llm_pos_ids_list.append(torch.arange(text_len).view(1, -1).expand(3, -1) + st_idx)
+
+                    range_tensor = torch.arange(llm_grid_t).view(-1, 1)
+                    expanded_range = range_tensor.expand(-1, llm_grid_h * llm_grid_w)
+                    if use_abs_time_pos:
+                        time_tensor = expanded_range * second_per_grid_t * config.tokens_per_second
+                        time_tensor_long = time_tensor.long()
+                    else:
+                        time_tensor_long = expanded_range.long()
+                    t_index = time_tensor_long.flatten()
+
+                    h_index = torch.arange(llm_grid_h).view(1, -1, 1).expand(llm_grid_t, -1, llm_grid_w).flatten()
+                    w_index = torch.arange(llm_grid_w).view(1, 1, -1).expand(llm_grid_t, llm_grid_h, -1).flatten()
+                    llm_pos_ids_list.append(torch.stack([t_index, h_index, w_index]) + text_len + st_idx)
+                    st = ed + llm_grid_t * llm_grid_h * llm_grid_w
+
+                if st < len(input_tokens):
+                    st_idx = llm_pos_ids_list[-1].max() + 1 if len(llm_pos_ids_list) > 0 else 0
+                    text_len = len(input_tokens) - st
+                    llm_pos_ids_list.append(torch.arange(text_len).view(1, -1).expand(3, -1) + st_idx)
+
+                llm_positions = torch.cat(llm_pos_ids_list, dim=1).reshape(3, -1)
+                position_ids[..., i, attention_mask[i] == 1] = llm_positions.to(position_ids.device)
+                mrope_position_deltas.append(llm_positions.max() + 1 - len(total_input_ids[i]))
+            mrope_position_deltas = torch.tensor(mrope_position_deltas, device=input_ids.device).unsqueeze(1)
+        else:
+            if attention_mask is not None:
+                position_ids = attention_mask.long().cumsum(-1) - 1
+                position_ids.masked_fill_(attention_mask == 0, 1)
+                position_ids = position_ids.unsqueeze(0).expand(3, -1, -1).to(input_ids.device)
+                max_position_ids = position_ids.max(0, keepdim=False)[0].max(-1, keepdim=True)[0]
+                mrope_position_deltas = max_position_ids + 1 - attention_mask.shape[-1]
+            else:
+                position_ids = (
+                    torch.arange(input_ids.shape[1], device=input_ids.device)
+                    .view(1, 1, -1)
+                    .expand(3, input_ids.shape[0], -1)
+                )
+                mrope_position_deltas = torch.zeros(
+                    [input_ids.shape[0], 1],
+                    device=input_ids.device,
+                    dtype=input_ids.dtype,
+                )
+
+        return position_ids, mrope_position_deltas
+
+
+class BailingMoeV2MLP(nn.Module):
+    def __init__(self, config: BailingMoeV2Config, intermediate_size: int):
         super().__init__()
         self.config = config
         self.hidden_size = config.hidden_size
@@ -452,21 +643,27 @@ class BailingMoeMLP(nn.Module):
         self.down_proj = nn.Linear(self.intermediate_size, self.hidden_size, bias=False)
         self.act_fn = ACT2FN[config.hidden_act]
 
-    def forward(self, x):
+    def forward(self, x, image_mask=None, audio_mask=None):
         return self.down_proj(self.act_fn(self.gate_proj(x)) * self.up_proj(x))
 
 
-class BailingMoeGate(nn.Module):
+class BailingMoeV2Gate(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.config = config
         self.top_k = config.num_experts_per_tok
         self.num_experts = config.num_experts
 
+        self.n_group = config.n_group
+        self.topk_group = config.topk_group
+
         # topk selection algorithm
-        self.norm_topk_prob = config.norm_topk_prob
         self.gating_dim = config.hidden_size
         self.weight = nn.Parameter(torch.empty((self.num_experts, self.gating_dim)))
+        self.routed_scaling_factor = config.routed_scaling_factor
+        self.bias_update_coeff = 0.001
+
+        self.expert_bias = torch.nn.Parameter(torch.zeros(self.num_experts), requires_grad=False)
         self.reset_parameters()
 
     def reset_parameters(self) -> None:
@@ -474,105 +671,130 @@ class BailingMoeGate(nn.Module):
 
         init.kaiming_uniform_(self.weight, a=math.sqrt(5))
 
-    def forward(self, hidden_states, sort=False):
-        bsz, seq_len, h = hidden_states.shape
+    def update_bias(self, distribution: torch.Tensor):
+        with torch.no_grad():
+            delta_bias = (distribution.mean() - distribution).sign()
+        self.expert_bias.data = self.expert_bias.data + self.bias_update_coeff * delta_bias
+
+    def group_limited_topk(
+        self,
+        scores: torch.Tensor,
+    ):
+        num_tokens, _ = scores.size()
+        # Organize the experts into groups
+        group_scores = scores.view(num_tokens, self.n_group, -1).topk(2, dim=-1)[0].sum(dim=-1)
+        group_idx = torch.topk(group_scores, k=self.topk_group, dim=-1, sorted=False)[1]
+        group_mask = torch.zeros_like(group_scores)
+        group_mask.scatter_(1, group_idx, 1)
+
+        # Mask the experts based on selection groups
+        score_mask = (
+            group_mask.unsqueeze(-1)
+            .expand(num_tokens, self.n_group, self.num_experts // self.n_group)
+            .reshape(num_tokens, -1)
+        )
+
+        masked_scores = scores.masked_fill(~score_mask.bool(), float('-inf'))
+        probs, top_indices = torch.topk(masked_scores, k=self.top_k, dim=-1, sorted=False)
+
+        return probs, top_indices
+
+    def forward(self, hidden_states):
         # compute gating score
-        hidden_states = hidden_states.view(-1, h)
-        logits = F.linear(hidden_states, self.weight, None)
-        scores = logits.softmax(dim=-1, dtype=torch.float32)
+        hidden_states = hidden_states.view(-1, hidden_states.shape[-1])
+        logits = F.linear(hidden_states.type(torch.float32), self.weight.type(torch.float32))
 
-        # select top-k experts
-        topk_weight, topk_idx = torch.topk(scores, k=self.top_k, dim=-1)
+        scores = torch.sigmoid(logits)
 
-        # norm gate to sum 1
-        if self.top_k > 1 and self.norm_topk_prob:
-            denominator = topk_weight.sum(dim=-1, keepdim=True)
-            topk_weight = topk_weight / denominator
+        scores_for_routing = scores + self.expert_bias
+        _, topk_idx = self.group_limited_topk(scores_for_routing)
+
+        scores = torch.gather(scores, dim=1, index=topk_idx).type_as(logits)
+
+        topk_weight = scores / (scores.sum(dim=-1, keepdim=True) + 1e-20) if self.top_k > 1 else scores
+        topk_weight = topk_weight * self.routed_scaling_factor
 
         return topk_idx, topk_weight, logits
 
 
-class BailingMoeSparseMoeBlock(nn.Module):
+class BailingMoeV2SparseMoeBlock(nn.Module):
     """
     A mixed expert module containing shared experts.
     """
 
-    def __init__(self, config: BailingMoeConfig):
+    def __init__(self, config: BailingMoeV2Config):
         super().__init__()
         self.config = config
         self.num_experts_per_tok = config.num_experts_per_tok
         self._setup_experts()
-        self.multi_gate = config.multi_gate
-        if self.multi_gate:
-            self.image_gate = BailingMoeGate(config)
-            self.audio_gate = BailingMoeGate(config)
-        self.gate = BailingMoeGate(config)
+        self.router_type = config.router_type
+        if self.router_type == "topN":
+            logger.info(f"use topN Router")
+            self.gate = BailingMoeV2Gate(config)
+        elif self.router_type == "MultiRouter":
+            logger.info(f"use MultiRouter")
+            self.gate = BailingMoeV2Gate(config)
+            self.image_gate = BailingMoeV2Gate(config)
+            self.audio_gate = BailingMoeV2Gate(config)
         if config.num_shared_experts is not None:
-            self.shared_experts = BailingMoeMLP(
+            self.shared_experts = BailingMoeV2MLP(
                 config=config, intermediate_size=config.moe_intermediate_size * config.num_shared_experts
             )
 
     def _setup_experts(self):
         self.experts = nn.ModuleList(
             [
-                BailingMoeMLP(config=self.config, intermediate_size=self.config.moe_intermediate_size)
+                BailingMoeV2MLP(config=self.config, intermediate_size=self.config.moe_intermediate_size)
                 for _ in range(self.config.num_experts)
             ]
         )
 
-    def create_mask(self, device, start_indices, end_indices, indices):
-        start_indices = torch.tensor(start_indices, device=device).view(-1, 1)
-        end_indices = torch.tensor(end_indices, device=device).view(-1, 1)
-        return (indices > start_indices) & (indices < end_indices)
-        
-    def forward(
-        self, 
-        hidden_states: torch.Tensor,
-        image_mask: Optional[torch.Tensor] = None,
-        audio_mask: Optional[torch.Tensor] = None,
-    ):
+    def forward(self, hidden_states, image_mask, audio_mask):
         identity = hidden_states
         bsz, seq_len, h = hidden_states.shape
-
-        if self.multi_gate:
-            # Get base text router results
-            topk_idx, topk_weight, router_logits = self.gate(hidden_states)
-
-            # Verify mask consistency when both modalities exist
+        if self.router_type == "MultiRouter":
+            if image_mask is not None:
+                if len(image_mask.shape) == 3:
+                    assert image_mask.shape[-1] == 1
+                elif len(image_mask.shape) == 2:
+                    assert image_mask.shape == hidden_states.shape[:2]
+                    image_mask = image_mask.unsqueeze(-1)
+                else:
+                    print('image mask shape, sum', image_mask.shape, image_mask.sum())
+                    assert False
+            if audio_mask is not None:
+                if len(audio_mask.shape) == 3:
+                    assert audio_mask.shape[-1] == 1
+                elif len(audio_mask.shape) == 2:
+                    assert audio_mask.shape == hidden_states.shape[:2]
+                    audio_mask = audio_mask.unsqueeze(-1)
+                else:
+                    print('audio mask shape, sum', audio_mask.shape, audio_mask.sum())
+                    assert False
             if image_mask is not None and audio_mask is not None:
                 assert torch.logical_and(image_mask, audio_mask).sum() == 0
+            
+            image_topk_idx, image_topk_weight, image_router_logits = self.image_gate(hidden_states)
+            audio_topk_idx, audio_topk_weight, audio_router_logits = self.audio_gate(hidden_states)
+            topk_idx, topk_weight, router_logits = self.gate(hidden_states)
 
-            # Process image modality
             if image_mask is not None:
-                image_topk_idx, image_topk_weight, image_router_logits = self.image_gate(hidden_states)
-                image_mask = image_mask.reshape(bsz * seq_len, 1)
-
-                topk_idx = topk_idx * ~image_mask + image_topk_idx * image_mask
-                topk_weight = topk_weight * ~image_mask + image_topk_weight * image_mask
-                router_logits = router_logits * ~image_mask + image_router_logits * image_mask
-
-            # Process audio modality
+                image_mask = image_mask.view(-1, 1)
+                topk_idx = image_topk_idx * image_mask + topk_idx * torch.logical_not(image_mask)
+                topk_weight = image_topk_weight * image_mask + topk_weight * torch.logical_not(image_mask)
+                router_logits = image_router_logits * image_mask + router_logits * torch.logical_not(image_mask)
             if audio_mask is not None:
-                audio_topk_idx, audio_topk_weight, audio_router_logits = self.audio_gate(hidden_states)
-                audio_mask = audio_mask.reshape(bsz * seq_len, 1)
-
-                topk_idx = topk_idx * ~audio_mask + audio_topk_idx * audio_mask
-                topk_weight = topk_weight * ~audio_mask + audio_topk_weight * audio_mask
-                router_logits = router_logits * ~audio_mask + audio_router_logits * audio_mask
-
+                audio_mask = audio_mask.view(-1, 1)
+                audio_mask = audio_mask.to(router_logits.device)
+                topk_idx = audio_topk_idx * audio_mask + topk_idx * torch.logical_not(audio_mask)
+                topk_weight = audio_topk_weight * audio_mask + topk_weight * torch.logical_not(audio_mask)
+                router_logits = audio_router_logits * audio_mask + router_logits * torch.logical_not(audio_mask)
         else:
             topk_idx, topk_weight, router_logits = self.gate(hidden_states)
+
         hidden_states = hidden_states.view(-1, hidden_states.shape[-1])
         flat_topk_idx = topk_idx.view(-1)
-        if self.training:
-            hidden_states = hidden_states.repeat_interleave(self.num_experts_per_tok, dim=0)
-            y = torch.empty_like(hidden_states)
-            for i, expert in enumerate(self.experts):
-                y[flat_topk_idx == i] = expert(hidden_states[flat_topk_idx == i])
-            y = (y.view(*topk_weight.shape, -1) * topk_weight.unsqueeze(-1)).sum(dim=1)
-            y = y.to(hidden_states.dtype).view(bsz, seq_len, h)
-        else:
-            y = self.moe_infer(hidden_states, topk_idx, topk_weight).view(bsz, seq_len, h)
+        y = self.moe_infer(hidden_states, topk_idx, topk_weight).view(bsz, seq_len, h)
         if self.config.num_shared_experts is not None:
             y = y + self.shared_experts(identity)
         return y, (router_logits.view(bsz, seq_len, -1), topk_idx.view(bsz, seq_len, -1))
@@ -595,7 +817,7 @@ class BailingMoeSparseMoeBlock(nn.Module):
             expert = self.experts[i]
             tokens_for_this_expert = sorted_tokens[start_idx:end_idx]
             expert_out = expert(tokens_for_this_expert)
-            outputs.append(expert_out)
+            outputs.append(expert_out.to(x.device))
             start_idx = end_idx
 
         outs = torch.cat(outputs, dim=0) if len(outputs) else sorted_tokens.new_empty(0)
@@ -624,11 +846,11 @@ def repeat_kv(hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
     return hidden_states.reshape(batch, num_key_value_heads * n_rep, slen, head_dim)
 
 
-# Copied from transformers.models.llama.modeling_llama.LlamaAttention with Llama->BailingMoe
-class BailingMoeAttention(nn.Module):
+# Copied from transformers.models.llama.modeling_llama.LlamaAttention with Llama->BailingMoeV2
+class BailingMoeV2Attention(nn.Module):
     """Multi-headed attention from 'Attention Is All You Need' paper"""
 
-    def __init__(self, config: BailingMoeConfig, layer_idx: Optional[int] = None):
+    def __init__(self, config: BailingMoeV2Config, layer_idx: Optional[int] = None):
         super().__init__()
         self.config = config
         self.layer_idx = layer_idx
@@ -643,6 +865,8 @@ class BailingMoeAttention(nn.Module):
         self.hidden_size = config.hidden_size
         self.num_heads = config.num_attention_heads
         self.head_dim = config.head_dim or self.hidden_size // self.num_heads
+        partial_rotary_factor = config.partial_rotary_factor if hasattr(config, "partial_rotary_factor") else 1.0
+        self.rope_dim = int(self.head_dim * partial_rotary_factor)
         self.num_key_value_heads = config.num_key_value_heads
         self.num_key_value_groups = self.num_heads // self.num_key_value_heads
         self.max_position_embeddings = config.max_position_embeddings
@@ -654,60 +878,14 @@ class BailingMoeAttention(nn.Module):
             (self.num_heads + 2 * self.num_key_value_heads) * self.head_dim,
             bias=config.use_qkv_bias,
         )
-        self.dense = nn.Linear(self.num_heads * self.head_dim, self.hidden_size, bias=config.use_bias)
-        self._init_rope()
 
-    def _init_rope(self):
-        if self.config.rope_scaling is None:
-            self.rotary_emb = BailingMoeRotaryEmbedding(
-                self.head_dim,
-                max_position_embeddings=self.max_position_embeddings,
-                base=self.rope_theta,
-            )
-        else:
-            scaling_type = self.config.rope_scaling["type"]
-            scaling_factor = self.config.rope_scaling["factor"]
-            if scaling_type == "linear":
-                self.rotary_emb = BailingMoeLinearScalingRotaryEmbedding(
-                    self.head_dim,
-                    max_position_embeddings=self.max_position_embeddings,
-                    scaling_factor=scaling_factor,
-                    base=self.rope_theta,
-                )
-            elif scaling_type == "dynamic":
-                self.rotary_emb = BailingMoeDynamicNTKScalingRotaryEmbedding(
-                    self.head_dim,
-                    max_position_embeddings=self.max_position_embeddings,
-                    scaling_factor=scaling_factor,
-                    base=self.rope_theta,
-                )
-            elif scaling_type == "yarn":
-                kwargs = {
-                    key: self.config.rope_scaling[key]
-                    for key in [
-                        "original_max_position_embeddings",
-                        "beta_fast",
-                        "beta_slow",
-                        "mscale",
-                        "mscale_all_dim",
-                    ]
-                    if key in self.config.rope_scaling
-                }
-                self.rotary_emb = BailingMoeYarnRotaryEmbedding(
-                    self.head_dim,
-                    max_position_embeddings=self.max_position_embeddings,
-                    scaling_factor=scaling_factor,
-                    base=self.rope_theta,
-                    **kwargs,
-                )
-            elif scaling_type == "3D" or scaling_type == "video_rope":
-                self.rotary_emb = BailingMoe3DRotaryEmbedding(
-                    self.head_dim,
-                    max_position_embeddings=self.max_position_embeddings,
-                    base=self.rope_theta,
-                )
-            else:
-                raise ValueError(f"Unknown RoPE scaling type {scaling_type}")
+        self.q_norm = BailingMoeV2RMSNorm(self.head_dim, eps=config.rms_norm_eps)
+        self.k_norm = BailingMoeV2RMSNorm(self.head_dim, eps=config.rms_norm_eps)
+        self.dense = nn.Linear(self.num_heads * self.head_dim, self.hidden_size, bias=config.use_bias)
+
+        if self.config.rope_scaling is not None:
+            self.rope_scaling = {"type": "mrope", "mrope_section": [8, 12, 12]}
+            self.mrope_section = self.rope_scaling["mrope_section"]
 
     def _shape(self, tensor: torch.Tensor, seq_len: int, bsz: int):
         return tensor.view(bsz, seq_len, self.num_heads, self.head_dim).transpose(1, 2).contiguous()
@@ -720,6 +898,7 @@ class BailingMoeAttention(nn.Module):
         past_key_value: Optional[Cache] = None,
         output_attentions: bool = False,
         use_cache: bool = False,
+        position_embeddings: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,  # necessary, but kept here for BC
         **kwargs,
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Tuple[torch.Tensor]]]:
         if "padding_mask" in kwargs:
@@ -739,6 +918,15 @@ class BailingMoeAttention(nn.Module):
         key_states = key_states.transpose(1, 2)
         value_states = value_states.transpose(1, 2)
 
+        if not self.training:
+            query_states = query_states.contiguous()
+            key_states = key_states.contiguous()
+            value_states = value_states.contiguous()
+            del qkv
+
+        query_states = self.q_norm(query_states)
+        key_states = self.k_norm(key_states)
+
         kv_seq_len = key_states.shape[-2]
         if past_key_value is not None:
             if self.layer_idx is None:
@@ -748,14 +936,16 @@ class BailingMoeAttention(nn.Module):
                     "with a layer index."
                 )
             kv_seq_len += past_key_value.get_usable_length(kv_seq_len, self.layer_idx)
+        cos, sin = position_embeddings
+        query_states, key_states = apply_3d_rotary_pos_emb(
+            query_states, 
+            key_states, 
+            cos, 
+            sin, 
+            mrope_section=self.rope_scaling["mrope_section"], 
+            rope_type=self.config.rope_scaling["type"]
+        )
         
-        if self.config.rope_scaling is not None:
-            cos, sin = self.rotary_emb(value_states, position_ids=position_ids)
-            query_states, key_states = apply_multimodal_rotary_pos_emb(query_states, key_states, cos, sin, rope_type=self.config.rope_scaling["type"])
-        else:
-            cos, sin = self.rotary_emb(value_states, seq_len=kv_seq_len)
-            query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin, position_ids)
-
         if past_key_value is not None:
             cache_kwargs = {"sin": sin, "cos": cos}  # Specific to RoPE models
             key_states, value_states = past_key_value.update(key_states, value_states, self.layer_idx, cache_kwargs)
@@ -797,14 +987,17 @@ class BailingMoeAttention(nn.Module):
 
         if not output_attentions:
             attn_weights = None
+        
+        if not self.training:
+            del query_states, key_states, value_states
 
         return attn_output, attn_weights, past_key_value
 
 
-# Copied from transformers.models.llama.modeling_llama.LlamaFlashAttention2 with Llama->BailingMoe
-class BailingMoeFlashAttention2(BailingMoeAttention):
+# Copied from transformers.models.llama.modeling_llama.LlamaFlashAttention2 with Llama->BailingMoeV2
+class BailingMoeV2FlashAttention2(BailingMoeV2Attention):
     """
-    BailingMoe flash attention module. This module inherits from `BailingMoeAttention` as the weights of the module stays
+    BailingMoeV2 flash attention module. This module inherits from `BailingMoeV2Attention` as the weights of the module stays
     untouched. The only required change would be on the forward pass where it needs to correctly call the public API of
     flash attention and deal with padding tokens in case the input contains any of them.
     """
@@ -825,9 +1018,10 @@ class BailingMoeFlashAttention2(BailingMoeAttention):
         past_key_value: Optional[Cache] = None,
         output_attentions: bool = False,
         use_cache: bool = False,
+        position_embeddings: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,  # necessary, but kept here for BC
         **kwargs,
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Tuple[torch.Tensor]]]:
-        # BailingMoeFlashAttention2 attention does not support output_attentions
+        # BailingMoeV2FlashAttention2 attention does not support output_attentions
         if "padding_mask" in kwargs:
             warnings.warn(
                 "Passing `padding_mask` is deprecated and will be removed in v4.37. Please make sure use `attention_mask` instead.`"
@@ -854,16 +1048,30 @@ class BailingMoeFlashAttention2(BailingMoeAttention):
         key_states = key_states.transpose(1, 2)
         value_states = value_states.transpose(1, 2)
 
+        if not self.training:
+            query_states = query_states.contiguous()
+            key_states = key_states.contiguous()
+            value_states = value_states.contiguous()
+            del qkv
+
+        query_states = self.q_norm(query_states)
+        key_states = self.k_norm(key_states)
+
         kv_seq_len = key_states.shape[-2]
         if past_key_value is not None:
             kv_seq_len += past_key_value.get_usable_length(kv_seq_len, self.layer_idx)
-            
+        cos, sin = position_embeddings
         if self.config.rope_scaling is not None:
-            cos, sin = self.rotary_emb(value_states, position_ids=position_ids)
-            query_states, key_states = apply_multimodal_rotary_pos_emb(query_states, key_states, cos, sin, rope_type=self.config.rope_scaling["type"])
+            rope_type = self.config.rope_scaling.get("rope_type", self.config.rope_scaling.get("type"))
         else:
-            cos, sin = self.rotary_emb(value_states, seq_len=kv_seq_len)
-            query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin, position_ids)
+            rope_type = "default"
+        query_states, key_states = apply_3d_rotary_pos_emb(
+            query_states,
+            key_states,
+            cos,
+            sin,
+            rope_type=rope_type
+        )
 
         if past_key_value is not None:
             cache_kwargs = {"sin": sin, "cos": cos}  # Specific to RoPE models
@@ -881,7 +1089,7 @@ class BailingMoeFlashAttention2(BailingMoeAttention):
         # therefore the input hidden states gets silently cast in float32. Hence, we need
         # cast them back in the correct dtype just to be sure everything works as expected.
         # This might slow down training & inference so it is recommended to not cast the LayerNorms
-        # in fp32. (BailingMoeRMSNorm handles it correctly)
+        # in fp32. (BailingMoeV2RMSNorm handles it correctly)
 
         input_dtype = query_states.dtype
         if input_dtype == torch.float32:
@@ -891,7 +1099,7 @@ class BailingMoeFlashAttention2(BailingMoeAttention):
             elif torch.is_autocast_enabled():
                 target_dtype = torch.get_autocast_gpu_dtype()
             else:
-                target_dtype = self.q_proj.weight.dtype
+                target_dtype = self.query_key_value.weight.dtype
 
             logger.warning_once(
                 f"The input hidden states seems to be silently casted in float32, this might be related to"
@@ -912,6 +1120,9 @@ class BailingMoeFlashAttention2(BailingMoeAttention):
 
         if not output_attentions:
             attn_weights = None
+
+        if not self.training:
+            del query_states, key_states, value_states
 
         return attn_output, attn_weights, past_key_value
 
@@ -944,7 +1155,7 @@ class BailingMoeFlashAttention2(BailingMoeAttention):
         if not self._flash_attn_uses_top_left_mask:
             causal = self.is_causal
         else:
-            # TODO: Remove the `query_length != 1` check once Flash Attention for RoCm is bumped to 2.1. For details, please see the comment in BailingMoeFlashAttention2 __init__.
+            # TODO: Remove the `query_length != 1` check once Flash Attention for RoCm is bumped to 2.1. For details, please see the comment in BailingMoeV2FlashAttention2 __init__.
             causal = self.is_causal and query_length != 1
 
         # Contains at least one padding token in the sequence
@@ -1017,122 +1228,26 @@ class BailingMoeFlashAttention2(BailingMoeAttention):
         )
 
 
-# Copied from transformers.models.llama.modeling_llama.LlamaSdpaAttention with Llama->BailingMoe
-class BailingMoeSdpaAttention(BailingMoeAttention):
-    """
-    BailingMoe attention module using torch.nn.functional.scaled_dot_product_attention. This module inherits from
-    `BailingMoeAttention` as the weights of the module stays untouched. The only changes are on the forward pass to adapt to
-    SDPA API.
-    """
-
-    # Adapted from BailingMoeAttention.forward
-    def forward(
-        self,
-        hidden_states: torch.Tensor,
-        attention_mask: Optional[torch.Tensor] = None,
-        position_ids: Optional[torch.LongTensor] = None,
-        past_key_value: Optional[Cache] = None,
-        output_attentions: bool = False,
-        use_cache: bool = False,
-        **kwargs,
-    ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Tuple[torch.Tensor]]]:
-        if output_attentions:
-            # TODO: Improve this warning with e.g. `model.config.attn_implementation = "manual"` once this is implemented.
-            logger.warning_once(
-                "BailingMoeModel is using BailingMoeSdpaAttention, but `torch.nn.functional.scaled_dot_product_attention` does not support `output_attentions=True`. Falling back to the manual attention implementation, "
-                'but specifying the manual implementation will be required from Transformers version v5.0.0 onwards. This warning can be removed using the argument `attn_implementation="eager"` when loading the model.'
-            )
-            return super().forward(
-                hidden_states=hidden_states,
-                attention_mask=attention_mask,
-                position_ids=position_ids,
-                past_key_value=past_key_value,
-                output_attentions=output_attentions,
-                use_cache=use_cache,
-            )
-
-        bsz, q_len, _ = hidden_states.size()
-
-        qkv = self.query_key_value(hidden_states)
-        qkv = qkv.view(bsz, q_len, self.num_heads + 2 * self.num_key_value_heads, self.head_dim)
-
-        query_states, key_states, value_states = qkv.split(
-            [self.num_heads, self.num_key_value_heads, self.num_key_value_heads], dim=-2
-        )
-        query_states = query_states.transpose(1, 2)
-        key_states = key_states.transpose(1, 2)
-        value_states = value_states.transpose(1, 2)
-
-        kv_seq_len = key_states.shape[-2]
-        if past_key_value is not None:
-            kv_seq_len += past_key_value.get_usable_length(kv_seq_len, self.layer_idx)
-
-        if self.config.rope_scaling is not None:
-            cos, sin = self.rotary_emb(value_states, position_ids=position_ids)
-            query_states, key_states = apply_multimodal_rotary_pos_emb(query_states, key_states, cos, sin, rope_type=self.config.rope_scaling["type"])
-        else:
-            cos, sin = self.rotary_emb(value_states, seq_len=kv_seq_len)
-            query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin, position_ids)
-
-        if past_key_value is not None:
-            cache_kwargs = {"sin": sin, "cos": cos}  # Specific to RoPE models
-            key_states, value_states = past_key_value.update(key_states, value_states, self.layer_idx, cache_kwargs)
-
-        key_states = repeat_kv(key_states, self.num_key_value_groups)
-        value_states = repeat_kv(value_states, self.num_key_value_groups)
-
-        if attention_mask is not None:
-            if attention_mask.size() != (bsz, 1, q_len, kv_seq_len):
-                raise ValueError(
-                    f"Attention mask should be of size {(bsz, 1, q_len, kv_seq_len)}, but is {attention_mask.size()}"
-                )
-
-        # SDPA with memory-efficient backend is currently (torch==2.1.2) bugged with non-contiguous inputs with custom attn_mask,
-        # Reference: https://github.com/pytorch/pytorch/issues/112577.
-        if query_states.device.type == "cuda" and attention_mask is not None:
-            query_states = query_states.contiguous()
-            key_states = key_states.contiguous()
-            value_states = value_states.contiguous()
-
-        attn_output = torch.nn.functional.scaled_dot_product_attention(
-            query_states,
-            key_states,
-            value_states,
-            attn_mask=attention_mask,
-            dropout_p=self.attention_dropout if self.training else 0.0,
-            # The q_len > 1 is necessary to match with AttentionMaskConverter.to_causal_4d that does not create a causal mask in case q_len == 1.
-            is_causal=self.is_causal and attention_mask is None and q_len > 1,
-        )
-
-        attn_output = attn_output.transpose(1, 2).contiguous()
-        attn_output = attn_output.reshape(bsz, q_len, -1)
-
-        attn_output = self.dense(attn_output)
-
-        return attn_output, None, past_key_value
-
-
-BAILING_MOE_ATTENTION_CLASSES = {
-    "eager": BailingMoeAttention,
-    "flash_attention_2": BailingMoeFlashAttention2,
-    "sdpa": BailingMoeSdpaAttention,
+ATTENTION_CLASSES = {
+    "eager": BailingMoeV2Attention,
+    "flash_attention_2": BailingMoeV2FlashAttention2,
 }
 
 
-class BailingMoeDecoderLayer(nn.Module):
-    def __init__(self, config: BailingMoeConfig, layer_idx: int):
+class BailingMoeV2DecoderLayer(nn.Module):
+    def __init__(self, config: BailingMoeV2Config, layer_idx: int):
         super().__init__()
         self.hidden_size = config.hidden_size
 
-        self.attention = BAILING_MOE_ATTENTION_CLASSES[config._attn_implementation](config=config, layer_idx=layer_idx)
+        self.attention = ATTENTION_CLASSES[config._attn_implementation](config=config, layer_idx=layer_idx)
 
         self.mlp = (
-            BailingMoeSparseMoeBlock(config)
+            BailingMoeV2SparseMoeBlock(config)
             if (config.num_experts is not None and layer_idx >= config.first_k_dense_replace)
-            else BailingMoeMLP(config=config, intermediate_size=config.intermediate_size)
+            else BailingMoeV2MLP(config=config, intermediate_size=config.intermediate_size)
         )
-        self.input_layernorm = BailingMoeRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
-        self.post_attention_layernorm = BailingMoeRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+        self.input_layernorm = BailingMoeV2RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+        self.post_attention_layernorm = BailingMoeV2RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
 
     def forward(
         self,
@@ -1145,6 +1260,7 @@ class BailingMoeDecoderLayer(nn.Module):
         output_attentions: Optional[bool] = False,
         output_router_logits: Optional[bool] = False,
         use_cache: Optional[bool] = False,
+        position_embeddings: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,  # necessary, but kept here for BC
         **kwargs,
     ) -> Tuple[torch.FloatTensor, Optional[Tuple[torch.FloatTensor, torch.FloatTensor]]]:
         """
@@ -1183,6 +1299,7 @@ class BailingMoeDecoderLayer(nn.Module):
             position_ids=position_ids,
             past_key_value=past_key_value,
             output_attentions=output_attentions,
+            position_embeddings=position_embeddings,
             use_cache=use_cache,
         )
         hidden_states = residual + hidden_states
@@ -1191,11 +1308,12 @@ class BailingMoeDecoderLayer(nn.Module):
         residual = hidden_states
         hidden_states = self.post_attention_layernorm(hidden_states)
         hidden_states = self.mlp(hidden_states, image_mask, audio_mask)
+        #hidden_states = self.mlp(hidden_states)
         if isinstance(hidden_states, tuple):
             hidden_states, router_logits = hidden_states
         else:
             router_logits = None
-        hidden_states = residual + hidden_states
+        hidden_states = residual + hidden_states.to(residual.device)
 
         outputs = (hidden_states,)
 
@@ -1211,7 +1329,7 @@ class BailingMoeDecoderLayer(nn.Module):
         return outputs
 
 
-BAILINGMOE_START_DOCSTRING = r"""
+BAILINGMOEV2_START_DOCSTRING = r"""
     This model inherits from [`PreTrainedModel`]. Check the superclass documentation for the generic methods the
     library implements for all its model (such as downloading or saving, resizing the input embeddings, pruning heads
     etc.)
@@ -1221,7 +1339,7 @@ BAILINGMOE_START_DOCSTRING = r"""
     and behavior.
 
     Parameters:
-        config ([`BailingMoeConfig`]):
+        config ([`BailingMoeV2Config`]):
             Model configuration class with all the parameters of the model. Initializing with a config file does not
             load the weights associated with the model, only the configuration. Check out the
             [`~PreTrainedModel.from_pretrained`] method to load the model weights.
@@ -1229,14 +1347,14 @@ BAILINGMOE_START_DOCSTRING = r"""
 
 
 @add_start_docstrings(
-    "The bare BailingMoe Model outputting raw hidden-states without any specific head on top.",
-    BAILINGMOE_START_DOCSTRING,
+    "The bare BailingMoeV2 Model outputting raw hidden-states without any specific head on top.",
+    BAILINGMOEV2_START_DOCSTRING,
 )
-class BailingMoePreTrainedModel(PreTrainedModel):
-    config_class = BailingMoeConfig
+class BailingMoeV2PreTrainedModel(PreTrainedModel):
+    config_class = BailingMoeV2Config
     base_model_prefix = "model"
     supports_gradient_checkpointing = True
-    _no_split_modules = ["BailingMoeDecoderLayer"]
+    _no_split_modules = ["BailingMoeV2DecoderLayer"]
     _skip_keys_device_placement = "past_key_values"
     _supports_flash_attn_2 = True
     _supports_sdpa = True
@@ -1252,12 +1370,9 @@ class BailingMoePreTrainedModel(PreTrainedModel):
             module.weight.data.normal_(mean=0.0, std=std)
             if module.padding_idx is not None:
                 module.weight.data[module.padding_idx].zero_()
-    
-    def __init__(self, config: BailingMoeConfig):
-        super().__init__(config)
 
 
-BAILINGMOE_INPUTS_DOCSTRING = r"""
+BAILINGMOEV2_INPUTS_DOCSTRING = r"""
     Args:
         input_ids (`torch.LongTensor` of shape `(batch_size, sequence_length)`):
             Indices of input sequence tokens in the vocabulary. Padding will be ignored by default should you provide
@@ -1328,31 +1443,37 @@ BAILINGMOE_INPUTS_DOCSTRING = r"""
 
 
 @add_start_docstrings(
-    "The bare BailingMoe Model outputting raw hidden-states without any specific head on top.",
-    BAILINGMOE_START_DOCSTRING,
+    "The bare BailingMoeV2 Model outputting raw hidden-states without any specific head on top.",
+    BAILINGMOEV2_START_DOCSTRING,
 )
-class BailingMoeModel(BailingMoePreTrainedModel):
+class BailingMoeV2Model(BailingMoeV2PreTrainedModel):
     """
-    Transformer decoder consisting of *config.num_hidden_layers* layers. Each layer is a [`BailingMoeDecoderLayer`]
+    Transformer decoder consisting of *config.num_hidden_layers* layers. Each layer is a [`BailingMoeV2DecoderLayer`]
 
     Args:
-        config: BailingMoeConfig
+        config: BailingMoeV2Config
     """
 
-    def __init__(self, config: BailingMoeConfig):
+    def __init__(self, config: BailingMoeV2Config):
         super().__init__(config)
         self.padding_idx = config.pad_token_id
         self.vocab_size = config.vocab_size
 
         self.word_embeddings = nn.Embedding(config.vocab_size, config.hidden_size, self.padding_idx)
         self.layers = nn.ModuleList(
-            [BailingMoeDecoderLayer(config, layer_idx) for layer_idx in range(config.num_hidden_layers)]
+            [BailingMoeV2DecoderLayer(config, layer_idx) for layer_idx in range(config.num_hidden_layers)]
         )
         self._use_sdpa = config._attn_implementation == "sdpa"
         self._use_flash_attention_2 = config._attn_implementation == "flash_attention_2"
-        self.norm = BailingMoeRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
-
+        self.norm = BailingMoeV2RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+        if self.config.rope_scaling is not None:
+            self.rotary_emb = BailingMoeV2RotaryEmbedding3D(config=config)
+        else:
+            self.rotary_emb = BailingMoeV2RotaryEmbedding(config=config)
         self.gradient_checkpointing = False
+        config.spatial_merge_size = 2 
+        config.tokens_per_second = 2
+        self.rope_deltas = None
         # Initialize weights and apply final processing
         self.post_init()
 
@@ -1361,24 +1482,106 @@ class BailingMoeModel(BailingMoePreTrainedModel):
 
     def set_input_embeddings(self, value):
         self.word_embeddings = value
+ 
+    def prompt_wrap_vision(self, input_ids, inputs_embeds, vision_embeds, vision_token_id):
+        if vision_embeds is None or input_ids is None:
+            return inputs_embeds
 
-    @add_start_docstrings_to_model_forward(BAILINGMOE_INPUTS_DOCSTRING)
+        if len(vision_embeds.shape) == 3:
+            vision_embeds = vision_embeds.reshape(-1, vision_embeds.shape[-1])
+
+        n_image_tokens = (input_ids == vision_token_id).sum().item()
+        n_image_features = vision_embeds.shape[0]
+
+        if n_image_tokens != n_image_features:
+            raise ValueError(
+                f"Image features and image tokens do not match: tokens: {n_image_tokens}, features {n_image_features}"
+            )
+        vision_mask = (input_ids == vision_token_id).unsqueeze(-1).expand_as(inputs_embeds).to(inputs_embeds.device)
+        
+        image_embeds = vision_embeds.to(inputs_embeds.device, inputs_embeds.dtype)
+        inputs_embeds = inputs_embeds.masked_scatter(vision_mask, image_embeds)
+
+        return inputs_embeds
+
+    def prompt_wrap_audio(self, input_ids, inputs_embeds, audio_embeds, audio_embeds_lengths, placeholder_audio_loc_lens):
+        inputs_embeds = patch_continuous_features(
+           input_embeddings=inputs_embeds, placeholder_loc_lens=placeholder_audio_loc_lens,
+           encoded_feats=audio_embeds, encoded_feat_lens=audio_embeds_lengths,
+        )
+        router_mask_audio = build_modality_mask(placeholder_audio_loc_lens, inputs_embeds.shape[:-1])
+        router_mask_audio = router_mask_audio.to(inputs_embeds.device)
+        return inputs_embeds, router_mask_audio
+     
+    def prompt_wrap_navit(self, input_ids, config, query_embeds_image=None, query_embeds_video=None, query_embeds_audio=None,
+        query_embeds_audio_lengths=None, placeholder_audio_loc_lens=None, target_embeds=None):
+        inputs_embeds = self.word_embeddings(input_ids)
+        vision_mask = None
+        audio_mask = None
+        if query_embeds_image is None and query_embeds_video is None and query_embeds_audio is None and target_embeds is None:
+            return inputs_embeds, vision_mask, audio_mask
+
+        if query_embeds_image is not None:
+            inputs_embeds = self.prompt_wrap_vision(input_ids, inputs_embeds, query_embeds_image, config.image_patch_token)
+        if query_embeds_video is not None:
+            inputs_embeds = self.prompt_wrap_vision(input_ids, inputs_embeds, query_embeds_video, config.video_patch_token)
+
+        image_mask = input_ids == config.image_patch_token
+        video_mask = input_ids == config.video_patch_token
+        vision_mask = (image_mask + video_mask) > 0
+        vision_mask = vision_mask.unsqueeze(-1).to(input_ids.device)
+
+        if query_embeds_audio is not None:
+            inputs_embeds, audio_mask = self.prompt_wrap_audio(
+                input_ids, inputs_embeds, query_embeds_audio, query_embeds_audio_lengths, placeholder_audio_loc_lens,
+            )
+
+        return inputs_embeds, vision_mask, audio_mask
+
+
+    @add_start_docstrings_to_model_forward(BAILINGMOEV2_INPUTS_DOCSTRING)
     def forward(
         self,
         input_ids: torch.LongTensor = None,
         attention_mask: Optional[torch.Tensor] = None,
         position_ids: Optional[torch.LongTensor] = None,
+        query_embeds_image: Optional[torch.Tensor] = None,
+        query_embeds_video: Optional[torch.Tensor] = None,
+        query_embeds_audio: Optional[torch.Tensor] = None,
+        query_embeds_audio_lengths: Optional[torch.Tensor] = None,
+        placeholder_audio_loc_lens: Optional[torch.Tensor] = None,
+        target_embeds: Optional[torch.Tensor] = None, 
         past_key_values: Optional[List[torch.FloatTensor]] = None,
         inputs_embeds: Optional[torch.FloatTensor] = None,
+        image_grid_thw: Optional[torch.Tensor] = None,
+        image_grid_thw_video: Optional[torch.Tensor] = None, 
         use_cache: Optional[bool] = None,
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
         output_router_logits: Optional[bool] = None,
         return_dict: Optional[bool] = None,
-        image_mask: Optional[torch.Tensor] = None,
-        audio_mask: Optional[torch.Tensor] = None,
+        second_per_grid_ts: Optional[torch.Tensor] = None,
         **kwargs,
     ) -> Union[Tuple, MoeModelOutputWithPast]:
+
+        if inputs_embeds is not None:
+            words_embeddings = inputs_embeds
+            input_shape = inputs_embeds.size()[:2]
+        else:
+            if (query_embeds_image is None and query_embeds_video is None and query_embeds_audio is None and target_embeds is None) or input_ids.size(1) == 1:
+                words_embeddings = self.word_embeddings(input_ids.clip(0, self.word_embeddings.weight.shape[0] - 1))
+                input_shape = input_ids.size()
+                image_mask = None
+                audio_mask = None
+            else:
+                words_embeddings, image_mask, audio_mask = self.prompt_wrap_navit(
+                    input_ids.clip(0, self.word_embeddings.weight.shape[0] - 1), self.config, query_embeds_image, query_embeds_video, query_embeds_audio,
+                    query_embeds_audio_lengths, placeholder_audio_loc_lens, target_embeds,  # noqa
+                )
+
+                input_shape = words_embeddings.size()[:2]
+        embeddings = words_embeddings
+
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
         output_hidden_states = (
             output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
@@ -1421,9 +1624,42 @@ class BailingMoeModel(BailingMoePreTrainedModel):
             )
             position_ids = position_ids.unsqueeze(0)
 
-        if inputs_embeds is None:
-            inputs_embeds = self.word_embeddings(input_ids)
+        if self.rotary_emb.rope_type == "video_rope" and input_ids.size(1) != 1:
+            position_ids, rope_deltas = get_t_scale_rope_index(
+                self.config,
+                input_ids,
+                image_grid_thw,
+                image_grid_thw_video,
+                attention_mask,
+                scale_factor=2.0,
+                second_per_grid_ts=second_per_grid_ts,
+            )
+            self.rope_deltas = rope_deltas
+        elif self.rotary_emb.rope_type == "3D" and input_ids.size(1) != 1:
+            position_ids, rope_deltas = get_rope_index(
+                self.config,
+                input_ids,
+                image_grid_thw,
+                image_grid_thw_video,
+                attention_mask,
+                second_per_grid_ts,
+            )
+            self.rope_deltas = rope_deltas
+        elif self.rotary_emb.rope_type == "3D" or self.rotary_emb.rope_type == "video_rope": # decode stage
+            batch_size, seq_length = input_ids.shape
+            if past_key_values and self.rope_deltas:
+                delta = past_key_values[0][1].shape[2] + self.rope_deltas
+            elif past_key_values:
+                delta = torch.tensor(past_key_values[0][1].shape[2])
+            else:
+                delta = torch.tensor(0)
+            delta = delta.to(input_ids.device)
+            position_ids = torch.arange(seq_length, device=input_ids.device)
+            position_ids = position_ids.view(1, -1).expand(batch_size, -1)
+            position_ids = position_ids.add(delta)
+            position_ids = position_ids.unsqueeze(0).expand(3, -1, -1)
 
+        inputs_embeds = embeddings
         if self._use_flash_attention_2:
             # 2d mask is passed through the layers
             attention_mask = attention_mask if (attention_mask is not None and 0 in attention_mask) else None
@@ -1444,6 +1680,9 @@ class BailingMoeModel(BailingMoePreTrainedModel):
 
         # embed positions
         hidden_states = inputs_embeds
+
+        # create position embeddings to be shared across the decoder layers
+        position_embeddings = self.rotary_emb(hidden_states, position_ids)
 
         # decoder layers
         all_hidden_states = () if output_hidden_states else None
@@ -1467,6 +1706,7 @@ class BailingMoeModel(BailingMoePreTrainedModel):
                     output_attentions,
                     output_router_logits,
                     use_cache,
+                    position_embeddings,
                 )
             else:
                 layer_outputs = decoder_layer(
@@ -1479,6 +1719,7 @@ class BailingMoeModel(BailingMoePreTrainedModel):
                     output_attentions=output_attentions,
                     output_router_logits=output_router_logits,
                     use_cache=use_cache,
+                    position_embeddings=position_embeddings,
                 )
             hidden_states = layer_outputs[0]
 
@@ -1515,14 +1756,13 @@ class BailingMoeModel(BailingMoePreTrainedModel):
         )
 
 
-class BailingMoeForCausalLM(BailingMoePreTrainedModel, GenerationMixin):
+class BailingMoeV2ForCausalLM(BailingMoeV2PreTrainedModel, GenerationMixin):
     _tied_weights_keys = ["lm_head.weight"]
 
-    def __init__(self, config: BailingMoeConfig):
+    def __init__(self, config: BailingMoeV2Config):
         super().__init__(config)
-        self.model = BailingMoeModel(config)
+        self.model = BailingMoeV2Model(config)
         self.vocab_size = config.vocab_size
-        self.norm_head = config.norm_head
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
 
         # Initialize weights and apply final processing
@@ -1546,41 +1786,30 @@ class BailingMoeForCausalLM(BailingMoePreTrainedModel, GenerationMixin):
     def get_decoder(self):
         return self.model
 
-    def compute_logit(self, hidden_states):
-        if self.norm_head:
-            if self.training:
-                norm_weight = (
-                    self.lm_head.weight / (torch.norm(self.lm_head.weight, p=2, dim=0, keepdim=True) + 1e-7).detach()
-                )
-                logits = F.linear(hidden_states, norm_weight, None)
-            else:
-                self.lm_head.weight.data = (
-                    self.lm_head.weight.data.float()
-                    / (torch.norm(self.lm_head.weight.data.float(), p=2, dim=0, keepdim=True) + 1e-7)
-                ).to(hidden_states.dtype)
-                logits = F.linear(hidden_states, self.lm_head.weight.data, None)
-                self.norm_head = False
-        else:
-            logits = self.lm_head(hidden_states)
-        return logits
-
-    @add_start_docstrings_to_model_forward(BAILINGMOE_INPUTS_DOCSTRING)
+    @add_start_docstrings_to_model_forward(BAILINGMOEV2_INPUTS_DOCSTRING)
     @replace_return_docstrings(output_type=MoeCausalLMOutputWithPast, config_class=_CONFIG_FOR_DOC)
     def forward(
         self,
         input_ids: torch.LongTensor = None,
         attention_mask: Optional[torch.Tensor] = None,
+        query_embeds_image: Optional[torch.Tensor] = None,
+        query_embeds_video: Optional[torch.Tensor] = None,
+        query_embeds_audio: Optional[torch.Tensor] = None,
+        query_embeds_audio_lengths: Optional[torch.Tensor] = None,
+        placeholder_audio_loc_lens: Optional[torch.Tensor] = None,
         position_ids: Optional[torch.LongTensor] = None,
         past_key_values: Optional[List[torch.FloatTensor]] = None,
         inputs_embeds: Optional[torch.FloatTensor] = None,
+        image_grid_thw: Optional[torch.Tensor] = None,
+        image_grid_thw_video: Optional[torch.Tensor] = None,
         labels: Optional[torch.LongTensor] = None,
         use_cache: Optional[bool] = None,
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
         output_router_logits: Optional[bool] = None,
         return_dict: Optional[bool] = None,
-        image_mask: Optional[torch.Tensor] = None,
-        audio_mask: Optional[torch.Tensor] = None,
+        second_per_grid_ts: Optional[torch.Tensor] = None,
+        num_logits_to_keep: Optional[int] = 0,
         **kwargs,
     ) -> Union[Tuple, MoeCausalLMOutputWithPast]:
         r"""
@@ -1597,7 +1826,7 @@ class BailingMoeForCausalLM(BailingMoePreTrainedModel, GenerationMixin):
         ```python
         >>> from transformers import AutoTokenizer
 
-        >>> model = BailingMoeForCausalLM.from_pretrained(PATH_TO_CONVERTED_WEIGHTS)
+        >>> model = BailingMoeV2ForCausalLM.from_pretrained(PATH_TO_CONVERTED_WEIGHTS)
         >>> tokenizer = AutoTokenizer.from_pretrained(PATH_TO_CONVERTED_TOKENIZER)
 
         >>> prompt = "Hey, are you conscious? Can you talk to me?"
@@ -1621,22 +1850,28 @@ class BailingMoeForCausalLM(BailingMoePreTrainedModel, GenerationMixin):
             input_ids=input_ids,
             attention_mask=attention_mask,
             position_ids=position_ids,
+            query_embeds_image=query_embeds_image,
+            query_embeds_video=query_embeds_video,
+            query_embeds_audio=query_embeds_audio,
+            query_embeds_audio_lengths=query_embeds_audio_lengths,
+            placeholder_audio_loc_lens=placeholder_audio_loc_lens,
             past_key_values=past_key_values,
             inputs_embeds=inputs_embeds,
+            image_grid_thw=image_grid_thw,
+            image_grid_thw_video=image_grid_thw_video,
             use_cache=use_cache,
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
             output_router_logits=output_router_logits,
             return_dict=return_dict,
-            image_mask=image_mask,
-            audio_mask=audio_mask,
+            second_per_grid_ts=second_per_grid_ts,
             **kwargs,
         )
 
         hidden_states = outputs[0]
 
-        logits = self.compute_logit(hidden_states=hidden_states)
-        logits = logits.float()
+        logits = self.lm_head(hidden_states[:, -num_logits_to_keep:, :])
+        # logits = logits.float()
 
         loss = None
         aux_loss = None
@@ -1646,7 +1881,7 @@ class BailingMoeForCausalLM(BailingMoePreTrainedModel, GenerationMixin):
             shift_logits = logits[..., :-1, :].contiguous()
             shift_labels = labels[..., 1:].contiguous()
             # Flatten the tokens
-            loss_fct = CrossEntropyLoss()
+            loss_fct = CrossEntropyLoss(inplace_backward=True)
             shift_logits = shift_logits.view(-1, self.config.vocab_size)
             shift_labels = shift_labels.view(-1)
             # Enable model parallelism
@@ -1670,17 +1905,27 @@ class BailingMoeForCausalLM(BailingMoePreTrainedModel, GenerationMixin):
         )
 
     def prepare_inputs_for_generation(
-        self, 
-        input_ids, 
-        past_key_values=None, 
-        attention_mask=None, 
-        position_ids=None,
-        inputs_embeds=None, 
-        cache_position=None,
+        self,
+        input_ids,
+        query_embeds_image: torch.Tensor = None,
+        query_embeds_video: torch.Tensor = None,
+        query_embeds_audio: torch.Tensor = None,
+        query_embeds_audio_lengths: torch.Tensor = None,
+        placeholder_audio_loc_lens: torch.Tensor = None,
         image_mask=None,
         audio_mask=None,
-        rope_deltas=None,
-        **kwargs
+        past_key_values=None,
+        attention_mask=None,
+        inputs_embeds=None,
+        cache_position=None,
+        position_ids=None,
+        use_cache=True,
+        image_grid_thw=None,
+        image_grid_thw_video=None,
+        second_per_grid_ts=None,
+        is_audio_generation_mode=False,
+        num_logits_to_keep=0,
+        **kwargs,
     ):
         if past_key_values is not None:
             if isinstance(past_key_values, Cache):
@@ -1694,10 +1939,6 @@ class BailingMoeForCausalLM(BailingMoePreTrainedModel, GenerationMixin):
             else:
                 cache_length = past_length = past_key_values[0][0].shape[2]
                 max_cache_length = None
-            if inputs_embeds is not None:
-                input_ids = input_ids[:, -cache_position.shape[0]:]
-            elif input_ids.shape[1] != cache_position.shape[0]:
-                input_ids = input_ids[:, cache_position]
 
             # Keep only the unprocessed tokens:
             # 1 - If the length of the attention_mask exceeds the length of input_ids, then we are in a setting where
@@ -1718,43 +1959,37 @@ class BailingMoeForCausalLM(BailingMoePreTrainedModel, GenerationMixin):
             ):
                 attention_mask = attention_mask[:, -max_cache_length:]
 
+        position_ids = kwargs.get("position_ids", None)
         if attention_mask is not None and position_ids is None:
             # create position_ids on the fly for batch generation
             position_ids = attention_mask.long().cumsum(-1) - 1
             position_ids.masked_fill_(attention_mask == 0, 1)
             if past_key_values:
                 position_ids = position_ids[:, -input_ids.shape[1] :]
+            position_ids = position_ids.unsqueeze(0)
 
         # if `inputs_embeds` are passed, we only want to use them in the 1st generation step
-        if inputs_embeds is not None and len(cache_position) == inputs_embeds.shape[1]:
-            model_inputs = {"inputs_embeds": inputs_embeds}
-            if rope_deltas is not None:
-                self.rope_deltas = rope_deltas
+        if inputs_embeds is not None and past_key_values is None:
+            model_inputs = {"inputs_embeds": inputs_embeds, "input_ids": None}
         else:
-            model_inputs = {"input_ids": input_ids}
-            image_mask = None
-            audio_mask = None
-            if rope_deltas is not None:
-                batch_size, seq_length = input_ids.shape
-                if past_key_values and self.rope_deltas:
-                    delta = past_key_values[0][1].shape[2] + self.rope_deltas
-                elif past_key_values:
-                    delta = torch.tensor(past_key_values[0][1].shape[2]).to(input_ids.device)
-                else:
-                    delta = torch.tensor(0).to(input_ids.device)
-                position_ids = torch.arange(seq_length, device=input_ids.device)
-                position_ids = position_ids.view(1, -1).expand(batch_size, -1)
-                position_ids = position_ids.add(delta)
-                position_ids = position_ids.unsqueeze(0).expand(3, -1, -1)
+            model_inputs = {"input_ids": input_ids, "inputs_embeds": None}
 
         model_inputs.update(
             {
+                "query_embeds_image": query_embeds_image,
+                "query_embeds_video": query_embeds_video,
+                "query_embeds_audio": query_embeds_audio,
                 "position_ids": position_ids,
                 "past_key_values": past_key_values,
-                "use_cache": kwargs.get("use_cache"),
+                "use_cache": use_cache,
                 "attention_mask": attention_mask,
+                "image_grid_thw": image_grid_thw,
+                "image_grid_thw_video": image_grid_thw_video,
                 "image_mask": image_mask,
                 "audio_mask": audio_mask,
+                "query_embeds_audio_lengths": query_embeds_audio_lengths,
+                "placeholder_audio_loc_lens": placeholder_audio_loc_lens,
+                "num_logits_to_keep": num_logits_to_keep,
             }
         )
         return model_inputs
@@ -1767,3 +2002,4 @@ class BailingMoeForCausalLM(BailingMoePreTrainedModel, GenerationMixin):
                 tuple(past_state.index_select(0, beam_idx.to(past_state.device)) for past_state in layer_past),
             )
         return reordered_past
+

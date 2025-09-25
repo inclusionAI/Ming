@@ -1,11 +1,8 @@
-""" Bailing MoE model configuration """
-
+"""Bailing MoE model configuration"""
 from transformers.configuration_utils import PretrainedConfig
 
-
-class BailingMoeConfig(PretrainedConfig):
-    model_type = "bailing_moe"
-
+class BailingMoeV2Config(PretrainedConfig):
+    model_type = "bailing_moe_v2"
     def __init__(
         self,
         vocab_size=30592,
@@ -16,6 +13,7 @@ class BailingMoeConfig(PretrainedConfig):
         num_key_value_heads=0,
         hidden_act="silu",
         use_qkv_bias=False,  # bailing only
+        use_qk_norm=False,
         use_bias=True,  # bailing only
         rms_norm_eps=1e-05,
         norm_head=False,  # bailing only
@@ -35,13 +33,15 @@ class BailingMoeConfig(PretrainedConfig):
         num_experts=16,
         num_shared_experts=0,
         num_experts_per_tok=2,
-        norm_topk_prob=True,
+        n_group=8,
+        topk_group=4,
+        routed_scaling_factor=2.5,
         moe_intermediate_size=None,
         first_k_dense_replace=0,
         head_dim=None,
         output_router_logits=False,
-        multi_gate=False,
-        image_patch_token=126346,
+        partial_rotary_factor=0.5,
+        router_type="topN",
         _attn_implementation="flash_attention_2",
         **kwargs,
     ):
@@ -68,16 +68,18 @@ class BailingMoeConfig(PretrainedConfig):
         self.max_window_layers = max_window_layers
         self.head_dim = head_dim or self.hidden_size // self.num_attention_heads
         self.rope_scaling = rope_scaling
-
         # MoE configs
         self.num_experts = num_experts
         self.num_shared_experts = num_shared_experts
         self.num_experts_per_tok = num_experts_per_tok
-        self.norm_topk_prob = norm_topk_prob
+        self.n_group = n_group
+        self.topk_group = topk_group
         self.moe_intermediate_size = moe_intermediate_size
         self.first_k_dense_replace = first_k_dense_replace
         self.output_router_logits = output_router_logits
-        self.multi_gate = multi_gate
-        self.image_patch_token = image_patch_token
+        self.routed_scaling_factor = routed_scaling_factor
+        self.partial_rotary_factor = partial_rotary_factor
+        self.router_type = router_type
         super().__init__(pad_token_id=pad_token_id, tie_word_embeddings=tie_word_embeddings, **kwargs)
         self._attn_implementation = _attn_implementation
+

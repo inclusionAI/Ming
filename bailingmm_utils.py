@@ -9,6 +9,7 @@ import time
 import warnings
 from functools import lru_cache
 from io import BytesIO
+from collections import Counter
 
 import random
 import numpy as np
@@ -39,18 +40,6 @@ FRAME_FACTOR = 2
 FPS = 2.0
 FPS_MIN_FRAMES = 4
 FPS_MAX_FRAMES = 128
-
-import PIL
-VideoInput = Union[
-    List["PIL.Image.Image"],
-    "np.ndarray",
-    "torch.Tensor",
-    List["np.ndarray"],
-    List["torch.Tensor"],
-    List[List["PIL.Image.Image"]],
-    List[List["np.ndarrray"]],
-    List[List["torch.Tensor"]],
-]
 
 def is_decord_available() -> bool:
     import importlib.util
@@ -182,7 +171,7 @@ def sample_frames(num_frames, total_frames, sample="random"):
                 padded_frame_indices = [frame_indices[-1]] * num_frames
                 padded_frame_indices[:len(frame_indices)] = frame_indices
                 frame_indices = padded_frame_indices
-        elif sample == "uniform" or sample == "adaptive":
+        elif sample == "uniform":
             frame_indices = [(x[0] + x[1]) // 2 for x in ranges]
             if len(frame_indices) < num_frames:
                 frame_indices = [
@@ -248,7 +237,15 @@ def _read_video_torchvision(
     total_frames, video_fps = video.size(0), info["video_fps"]
     logger.info(f"torchvision:  {video_path=}, {total_frames=}, {video_fps=}, time={time.time() - st:.3f}s")
 
-    num_frames = get_frames(ele, total_frames)
+    max_video_fps = ele.get("max_video_fps", 2.0)
+
+    if video_fps > max_video_fps and total_frames / float(video_fps) > 4.0:
+        num_frames = get_frames(ele, int(total_frames / float(video_fps) * max_video_fps))
+    else:
+        num_frames = get_frames(ele, total_frames)
+
+    # num_frames = get_frames(ele, total_frames)
+
     frame_indices = sample_frames(
         num_frames=num_frames, total_frames=total_frames, sample=sample_method
     )
@@ -281,83 +278,20 @@ def _read_video_decord(
     logger.info(f"decord:  {video_path=}, {total_frames=}, {video_fps=}, time={time.time() - st:.3f}s")
 
     sample_method = ele.get("sample", "sequence")
-    # if sample_method == "sequence":
-    #    total_frames = int(total_frames / video_fps * 2)
-    if video_fps > 2.0 and total_frames / float(video_fps) > 5.0:
-        num_frames = get_frames(ele, int(total_frames / float(video_fps) * 2))
+    max_video_fps = ele.get("max_video_fps", 2.0)
+
+    if video_fps > max_video_fps and total_frames / float(video_fps) > 4.0:
+        num_frames = get_frames(ele, int(total_frames / float(video_fps) * max_video_fps))
     else:
         num_frames = get_frames(ele, total_frames)
     frame_indices = sample_frames(
         num_frames=num_frames, total_frames=total_frames, sample=sample_method
     )
-    if sample_method == "adaptive" and len(frame_indices) > 64:
-        frames_indices_selected = select_frames_based_on_query(vr, frame_indices, ele)  # query的扩模态采样结果
-        indices = np.linspace(0, len(frame_indices) - 1, len(frame_indices)//2, dtype=int)
-        frame_indices = np.array(frame_indices)[indices].tolist()
-        frames_indices_selected_sort = np.sort(frame_indices + frames_indices_selected[:(num_frames - len(frame_indices))].tolist()).tolist()
-        video = vr.get_batch(frames_indices_selected_sort).asnumpy()
-    else:
-        video = vr.get_batch(frame_indices).asnumpy()
 
-    # video = vr.get_batch(frame_indices).asnumpy()
+    video = vr.get_batch(frame_indices).asnumpy()
     video = torch.tensor(video).permute(0, 3, 1, 2)  # Convert to TCHW format
     sample_fps = num_frames / max(total_frames, 1e-6) * video_fps
     return video, sample_fps
-
-def select_frames_based_on_query(vr, frame_indices, ele):
-    import sys
-    sys.path.join("./longvu")
-    '''
-    This LongVU model (https://github.com/Vision-CAIR/LongVU) computes cross-modal relevance 
-    between user queries and video frames for the purpose of frame selection.
-    It can also be replaced with other text/visual encoders to achieve the same effect.
-    To maintain consistency in the repository structure, this module has not been included in the repository directory for now.
-    If needed for evaluation, simply import this module.
-    '''
-    from longvu.constants import (
-        DEFAULT_IMAGE_TOKEN,
-        IMAGE_TOKEN_INDEX,
-    )
-    from longvu.conversation import conv_templates, SeparatorStyle
-    from longvu.mm_datautils import (
-        KeywordsStoppingCriteria,
-        process_images,
-        tokenizer_image_token,
-    )
-    tokenizer, model, image_processor = ele["tokenizer"], ele["model"], ele["image_processor"]
-    
-    # 考虑在这里扩展frame_indices
-    video = vr.get_batch(frame_indices).asnumpy()  # (21, 320, 568, 3)
-    
-    image_sizes = [video[0].shape[:2]]  # [(320, 568)]
-    video = process_images(video, image_processor, model.config)  # len(video)=2, 第一个 torch.Size([623, 3, 384, 384])，第二个 torch.Size([623, 3, 378, 378])
-    video = [item.unsqueeze(0) for item in video] # len(video)=2, 第一个 torch.Size([1, 623, 3, 384, 384])，第二个 torch.Size([1, 623, 3, 378, 378])
-    
-    qs = DEFAULT_IMAGE_TOKEN + "\n" + ele["text"]
-    conv = conv_templates["qwen"].copy()
-    conv.append_message(conv.roles[0], qs)
-    conv.append_message(conv.roles[1], None)
-    prompt = conv.get_prompt()
-    
-    input_ids = tokenizer_image_token(prompt, tokenizer, IMAGE_TOKEN_INDEX, return_tensors="pt").unsqueeze(0).to(model.device)  # torch.Size([1, 26])
-    stop_str = conv.sep if conv.sep_style != SeparatorStyle.TWO else conv.sep2  # '<|im_end|>'
-    keywords = [stop_str]
-    stopping_criteria = KeywordsStoppingCriteria(keywords, tokenizer, input_ids)
-    
-    with torch.inference_mode():
-        output_ids = model.generate(
-            input_ids,
-            images=video,
-            image_sizes=image_sizes,
-            do_sample=False,
-            temperature=0.2,
-            max_new_tokens=128,
-            use_cache=True,
-            stopping_criteria=[stopping_criteria],
-        )  # torch.Size([1, 128])
-    
-    selected_indices = np.array(frame_indices)[output_ids.cpu().numpy()]
-    return selected_indices
 
 VIDEO_READER_BACKENDS = {
     "decord": _read_video_decord,
@@ -513,29 +447,16 @@ def extract_vision_info(conversations: list[dict] | list[list[dict]]) -> list[di
         for message in conversation:
             if isinstance(message["content"], list):
                 for ele in message["content"]:
-                    sample_method = ele.get("sample", "sequence")
                     if (
                             "image" in ele
                             or "image_url" in ele
                             or "video" in ele
+                            or "video_url" in ele
                             or "audio" in ele
-                            or ele["type"] in ("image", "image_url", "video")
+                            or "audio_url" in ele
+                            or ele["type"] in ["image", "image_url", "video", "video_url", "audio", "audio_url"]
                     ):
                         vision_infos.append(ele)
-                    # 把视频的 query_text 也加进来
-                    if "text" in ele: 
-                        text = ele["text"]
-                    if "video" in ele and sample_method == "adaptive":
-                        tokenizer = ele["tokenizer"]
-                        model = ele["model"]
-                        image_processor = ele["image_processor"]
-    for ele in vision_infos:
-        sample_method = ele.get("sample", "sequence")
-        if "video" in ele and sample_method == "adaptive":
-            ele["text"] = text
-            ele["tokenizer"] = tokenizer
-            ele["model"] = model
-            ele["image_processor"] = image_processor
     return vision_infos
 
 def process_vision_info(
@@ -549,21 +470,29 @@ def process_vision_info(
     audio_inputs = []
     for vision_info in vision_infos:
         if "image" in vision_info or "image_url" in vision_info:
-            if isinstance(vision_info["image"], (tuple, list)):
+            if "image" in vision_info and isinstance(vision_info["image"], (tuple, list)):
                 for i in range(len(vision_info["image"])):
                     image_inputs.append(fetch_image({"type": "image", "image": vision_info["image"][i]}))
+            elif "image_url" in vision_info and vision_info["image_url"].get("url", None) is not None:
+                vision_info["image_url"] = vision_info["image_url"].get("url")
+                image_inputs.append(fetch_image(vision_info))
             else:
                 image_inputs.append(fetch_image(vision_info))
         elif "video" in vision_info or "video_url" in vision_info:
-            if is_video(vision_info['video']):
+            if "video" in vision_info and is_video(vision_info['video']):
                 data_value = vision_info['video']
+            elif "video_url" in vision_info and vision_info["video_url"].get("url", None) is not None:
+                data_value = vision_info["video_url"].get("url")
             else:
                 data_value = [os.path.join(vision_info['video'], frame) for frame in sorted(os.listdir(vision_info['video']))]
             vision_info['video']=data_value
             video_inputs.append(fetch_video(vision_info))
         elif "audio" in vision_info or "audio_url" in vision_info:
-            if isinstance(vision_info["audio"], (tuple, list)):
+            if "audio" in vision_info and isinstance(vision_info["audio"], (tuple, list)):
                 audio_inputs.extend(fetch_audio(info) for info in vision_info["audio"])
+            elif "audio_url" in vision_info and vision_info["audio_url"].get("url", None) is not None:
+                vision_info["audio_url"] = vision_info["audio_url"].get("url")
+                audio_inputs.append(fetch_audio(vision_info))
             else:
                 audio_inputs.append(fetch_audio(vision_info))
         else:
@@ -575,61 +504,3 @@ def process_vision_info(
     if len(audio_inputs) == 0:
         audio_inputs = None
     return image_inputs, video_inputs, audio_inputs
-
-def get_closest_ratio(height: float, width: float, aspect_ratios: dict):
-    aspect_ratio = height / width
-    closest_ratio = min(aspect_ratios.keys(), key=lambda ratio: abs(float(ratio) - aspect_ratio))
-    return aspect_ratios[closest_ratio], float(closest_ratio)
-
-def process_ratio(ori_h, ori_w):
-    ASPECT_RATIO_512 = {
-        "0.25": [256, 1024],
-        "0.26": [256, 992],
-        "0.27": [256, 960],
-        "0.28": [256, 928],
-        "0.32": [288, 896],
-        "0.33": [288, 864],
-        "0.35": [288, 832],
-        "0.4": [320, 800],
-        "0.42": [320, 768],
-        "0.48": [352, 736],
-        "0.5": [352, 704],
-        "0.52": [352, 672],
-        "0.57": [384, 672],
-        "0.6": [384, 640],
-        "0.68": [416, 608],
-        "0.72": [416, 576],
-        "0.78": [448, 576],
-        "0.82": [448, 544],
-        "0.88": [480, 544],
-        "0.94": [480, 512],
-        "1.0": [512, 512],
-        "1.07": [512, 480],
-        "1.13": [544, 480],
-        "1.21": [544, 448],
-        "1.29": [576, 448],
-        "1.38": [576, 416],
-        "1.46": [608, 416],
-        "1.67": [640, 384],
-        "1.75": [672, 384],
-        "2.0": [704, 352],
-        "2.09": [736, 352],
-        "2.4": [768, 320],
-        "2.5": [800, 320],
-        "2.89": [832, 288],
-        "3.0": [864, 288],
-        "3.11": [896, 288],
-        "3.62": [928, 256],
-        "3.75": [960, 256],
-        "3.88": [992, 256],
-        "4.0": [1024, 256],
-    }
-
-    closest_size, _ = get_closest_ratio(ori_h, ori_w, aspect_ratios=ASPECT_RATIO_512)
-    closest_size = list(map(lambda x: int(x), closest_size))
-    if closest_size[0] / ori_h > closest_size[1] / ori_w:
-        resize_size = closest_size[0], int(ori_w * closest_size[0] / ori_h)
-    else:
-        resize_size = int(ori_h * closest_size[1] / ori_w), closest_size[1]
-
-    return closest_size, resize_size

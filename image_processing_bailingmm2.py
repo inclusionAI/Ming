@@ -30,7 +30,7 @@ from transformers.image_transforms import (
     resize,
     to_channel_dimension_format,
 )
-from transformers.video_utils import VideoInput
+from bailingmm_utils import VideoInput
 from transformers.image_utils import (
     OPENAI_CLIP_MEAN,
     OPENAI_CLIP_STD,

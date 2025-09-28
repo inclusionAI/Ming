@@ -1561,6 +1561,8 @@ class BailingMoeV2Model(BailingMoeV2PreTrainedModel):
         output_router_logits: Optional[bool] = None,
         return_dict: Optional[bool] = None,
         second_per_grid_ts: Optional[torch.Tensor] = None,
+        image_mask=None,
+        audio_mask=None,
         **kwargs,
     ) -> Union[Tuple, MoeModelOutputWithPast]:
 
@@ -1595,7 +1597,12 @@ class BailingMoeV2Model(BailingMoeV2PreTrainedModel):
 
         # retrieve input_ids and inputs_embeds
         if input_ids is not None and inputs_embeds is not None:
-            raise ValueError("You cannot specify both input_ids and inputs_embeds at the same time")
+            assert input_ids.size(1) == inputs_embeds.size(1), "{} vs {}".format(
+                input_ids.size,
+                inputs_embeds.size,
+            )
+            batch_size, seq_length = inputs_embeds.shape[:2]
+            #raise ValueError("You cannot specify both input_ids and inputs_embeds at the same time")
         elif input_ids is not None:
             batch_size, seq_length = input_ids.shape[:2]
         elif inputs_embeds is not None:
@@ -1810,6 +1817,8 @@ class BailingMoeV2ForCausalLM(BailingMoeV2PreTrainedModel, GenerationMixin):
         return_dict: Optional[bool] = None,
         second_per_grid_ts: Optional[torch.Tensor] = None,
         num_logits_to_keep: Optional[int] = 0,
+        image_mask=None,
+        audio_mask=None,
         **kwargs,
     ) -> Union[Tuple, MoeCausalLMOutputWithPast]:
         r"""
@@ -1865,6 +1874,8 @@ class BailingMoeV2ForCausalLM(BailingMoeV2PreTrainedModel, GenerationMixin):
             output_router_logits=output_router_logits,
             return_dict=return_dict,
             second_per_grid_ts=second_per_grid_ts,
+            image_mask=image_mask,
+            audio_mask=audio_mask,
             **kwargs,
         )
 

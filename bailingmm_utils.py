@@ -41,6 +41,17 @@ FPS = 2.0
 FPS_MIN_FRAMES = 4
 FPS_MAX_FRAMES = 128
 
+VideoInput = Union[
+    List["Image.Image"],
+    "np.ndarray",
+    "torch.Tensor",
+    List["np.ndarray"],
+    List["torch.Tensor"],
+    List[List["Image.Image"]],
+    List[List["np.ndarrray"]],
+    List[List["torch.Tensor"]],
+]
+
 def is_decord_available() -> bool:
     import importlib.util
     return importlib.util.find_spec("decord") is not None
@@ -504,3 +515,59 @@ def process_vision_info(
     if len(audio_inputs) == 0:
         audio_inputs = None
     return image_inputs, video_inputs, audio_inputs
+
+def get_closest_ratio(height: float, width: float, aspect_ratios: dict):
+    aspect_ratio = height / width
+    closest_ratio = min(aspect_ratios.keys(), key=lambda ratio: abs(float(ratio) - aspect_ratio))
+    return aspect_ratios[closest_ratio], float(closest_ratio)
+
+def process_ratio(ori_h, ori_w):
+    ASPECT_RATIO_512 = {
+        "0.25": [256, 1024],
+        "0.26": [256, 992],
+        "0.27": [256, 960],
+        "0.28": [256, 928],
+        "0.32": [288, 896],
+        "0.33": [288, 864],
+        "0.35": [288, 832],
+        "0.4": [320, 800],
+        "0.42": [320, 768],
+        "0.48": [352, 736],
+        "0.5": [352, 704],
+        "0.52": [352, 672],
+        "0.57": [384, 672],
+        "0.6": [384, 640],
+        "0.68": [416, 608],
+        "0.72": [416, 576],
+        "0.78": [448, 576],
+        "0.82": [448, 544],
+        "0.88": [480, 544],
+        "0.94": [480, 512],
+        "1.0": [512, 512],
+        "1.07": [512, 480],
+        "1.13": [544, 480],
+        "1.21": [544, 448],
+        "1.29": [576, 448],
+        "1.38": [576, 416],
+        "1.46": [608, 416],
+        "1.67": [640, 384],
+        "1.75": [672, 384],
+        "2.0": [704, 352],
+        "2.09": [736, 352],
+        "2.4": [768, 320],
+        "2.5": [800, 320],
+        "2.89": [832, 288],
+        "3.0": [864, 288],
+        "3.11": [896, 288],
+        "3.62": [928, 256],
+        "3.75": [960, 256],
+        "3.88": [992, 256],
+        "4.0": [1024, 256],
+    }
+    closest_size, _ = get_closest_ratio(ori_h, ori_w, aspect_ratios=ASPECT_RATIO_512)
+    closest_size = list(map(lambda x: int(x), closest_size))
+    if closest_size[0] / ori_h > closest_size[1] / ori_w:
+        resize_size = closest_size[0], int(ori_w * closest_size[0] / ori_h)
+    else:
+        resize_size = int(ori_h * closest_size[1] / ori_w), closest_size[1]
+    return closest_size, resize_size

@@ -240,6 +240,15 @@ If you find our work helpful, feel free to give us a cite.
 
 ```bibtex
 
+@misc{Mingflash2025,
+      title  = {Ming-Flash-Omni: A Sparse, Unified Architecture for Multimodal Perception and Generation}, 
+      author = {Inclusion AI},
+      year = {2025},
+      eprint = {2510.24821},
+      archivePrefix = {arXiv},
+      url = {https://arxiv.org/abs/2510.24821}
+}
+
 @misc{Mingomni2025,
       title  = {Ming-Omni: A Unified Multimodal Model for Perception and Generation}, 
       author = {Inclusion AI},

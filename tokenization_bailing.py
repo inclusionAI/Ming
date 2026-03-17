@@ -240,6 +240,7 @@ class BailingTokenizer(PreTrainedTokenizerFast):
                 return_dict=return_dict,
                 return_assistant_tokens_mask=return_assistant_tokens_mask,
                 tokenizer_kwargs=tokenizer_kwargs,
+                **kwargs,
             )
 
         # 非chat_template方式后续将不再支持。

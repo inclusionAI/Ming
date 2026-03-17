@@ -286,22 +286,21 @@ def v1_smart_nframes(
         int: the number of frames for video used for model inputs.
     """
     assert not ("fps" in ele and "nframes" in ele), "Only accept either `fps` or `nframes`"
-    
-    min_frames = ceil_by_factor(ele.get("min_frames", FPS_MIN_FRAMES), FRAME_FACTOR)
-    max_frames = floor_by_factor(ele.get("max_frames", min(FPS_MAX_FRAMES, total_frames)), FRAME_FACTOR)
-
+    max_frames = max(
+        1,
+        floor_by_factor(
+            ele.get("max_frames", min(FPS_MAX_FRAMES, total_frames)), FRAME_FACTOR
+        ),
+    )
     if "nframes" in ele:
         nframes = min(total_frames, round_by_factor(ele["nframes"], FRAME_FACTOR), max_frames)
     else:
         fps = ele.get("max_video_fps", FPS)
-        nframes = total_frames / video_fps * fps
+        nframes = max(1, total_frames / video_fps * fps)
         if nframes > total_frames:
             logger.warning(f"smart_nframes: nframes[{nframes}] > total_frames[{total_frames}]")
-        nframes = min(min(max(nframes, min_frames), max_frames), total_frames)
-        nframes = floor_by_factor(nframes, FRAME_FACTOR)
-    if not (FRAME_FACTOR <= nframes <= total_frames):
-        raise ValueError(f"nframes should in interval [{FRAME_FACTOR}, {total_frames}], but got {nframes}.")
-    return nframes
+        nframes = min(min(nframes, max_frames), total_frames)
+    return int(nframes)
 
 
 def v1_sample_video(video_fps, total_frames, ele: dict) -> List[int]:
@@ -367,8 +366,9 @@ def v1_fetch_video(
     return_metadata: bool = False,
 ) -> torch.Tensor | list[Image.Image]:
     if isinstance(ele["video"], str):
-        video, smp_fps = load_video(ele["video"], sampler=v2_sample_video)
-
+        video, smp_fps = load_video(
+            ele["video"], sampler=partial(v1_sample_video, ele=ele)
+        )
         if "resized_height" in ele and "resized_width" in ele:
             resized_height, resized_width = smart_resize(
                 ele["resized_height"],

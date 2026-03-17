@@ -54,6 +54,7 @@ class BailingMoeV2Config(PretrainedConfig):
         self.num_key_value_heads = num_key_value_heads
         self.hidden_act = hidden_act
         self.use_qkv_bias = use_qkv_bias
+        self.use_qk_norm = use_qk_norm
         self.use_bias = use_bias
         self.norm_head = norm_head
         self.rms_norm_eps = rms_norm_eps

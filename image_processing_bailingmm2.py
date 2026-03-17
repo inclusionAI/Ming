@@ -20,7 +20,7 @@
 """Image processor class for Qwen2-VL."""
 
 import math
-from typing import Optional, Union
+from typing import Dict, List, Optional, Union
 
 import numpy as np
 
@@ -46,8 +46,12 @@ from transformers.image_utils import (
 )
 
 import torch
+from torchvision.transforms import functional as F
+from torchvision.transforms import InterpolationMode
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 
+from PIL import Image
+from transformers.image_utils import is_valid_image
 try:
     from transformers.image_utils import VideoInput
 except:
@@ -57,6 +61,39 @@ from transformers.utils import TensorType, is_vision_available, logging
 from transformers.video_utils import make_batched_videos
 
 logger = logging.get_logger(__name__)
+
+def make_batched_videos_torch(videos, device="cpu") -> List[VideoInput]:
+    if isinstance(videos, (list, tuple)) and isinstance(videos[0], (list, tuple)) and is_valid_image(videos[0][0]):
+        return [torch.stack([torch.as_tensor(t, device=device) for t in ts]) for ts in videos]
+
+    elif isinstance(videos, (list, tuple)) and is_valid_image(videos[0]):
+        if isinstance(videos[0], Image.Image):
+            return torch.as_tensor([videos], device=device)
+        elif len(videos[0].shape) == 4:
+            return [torch.as_tensor(video, device=device) for video in videos]
+
+    elif is_valid_image(videos) and len(videos.shape) == 4:
+        return [torch.as_tensor(videos, device=device)]
+
+    raise ValueError(f"Could not make batched video from {videos}")
+
+
+def resize_torchvision(image, size, resample):
+    resample_method = {
+        PILImageResampling.NEAREST: InterpolationMode.NEAREST,
+        PILImageResampling.BILINEAR:InterpolationMode.BILINEAR,
+        PILImageResampling.BICUBIC: InterpolationMode.BICUBIC,
+    }
+    interpolation = resample_method.get(resample, InterpolationMode.BICUBIC)
+    return F.resize(img=image, size=size, interpolation=interpolation)
+
+
+def rescale_torchvision(image, scale, dtype=torch.float32):
+    return (image * scale).to(dtype)
+
+
+def normalize_torchvision(image, mean, std):
+    return F.normalize(image, mean=mean, std=std)
 
 
 class Qwen2VLImageProcessorKwargs(ImagesKwargs, total=False):
@@ -199,6 +236,69 @@ class BailingMM2ImageProcessor(BaseImageProcessor):
         self.temporal_patch_size = temporal_patch_size
         self.merge_size = merge_size
         self.do_convert_rgb = do_convert_rgb
+
+    def _preprocess_torch(
+        self,
+        images: Union[ImageInput, VideoInput],
+        do_resize: Optional[bool] = None,
+        size: Optional[dict[str, int]] = None,
+        resample: Optional[PILImageResampling] = None,
+        do_rescale: Optional[bool] = None,
+        rescale_factor: Optional[float] = None,
+        do_normalize: Optional[bool] = None,
+        image_mean: Optional[Union[float, list[float]]] = None,
+        image_std: Optional[Union[float, list[float]]] = None,
+        patch_size: Optional[int] = None,
+        temporal_patch_size: Optional[int] = None,
+        merge_size: Optional[int] = None,
+        do_convert_rgb: Optional[bool] = None,
+        data_format: Optional[ChannelDimension] = ChannelDimension.FIRST,
+        input_data_format: Optional[Union[str, ChannelDimension]] = None,
+    ):
+        if input_data_format is None:
+            # We assume that all images have the same channel dimension format.
+            input_data_format = infer_channel_dimension_format(images[0])
+        height, width = get_image_size(images[0], channel_dim=input_data_format)
+        resized_height, resized_width = height, width
+
+        if input_data_format == ChannelDimension.LAST:
+            images = images.permute(0, 3, 1, 2)  # to NCHW
+        if do_resize:
+            resized_height, resized_width = smart_resize(
+                height,
+                width,
+                factor=patch_size * merge_size,
+                min_pixels=size["shortest_edge"],
+                max_pixels=size["longest_edge"],
+            )
+            images = resize_torchvision(images, size=(resized_height, resized_width), resample=resample)
+        if do_rescale:
+            images = rescale_torchvision(images, scale=rescale_factor)
+        if do_normalize:
+            images = normalize_torchvision(images, mean=image_mean, std=image_std)
+        if images.shape[0] == 1:
+            images = torch.tile(images, (self.temporal_patch_size, 1, 1, 1))
+        patches = images
+        channel = patches.shape[1]
+        grid_t = patches.shape[0] // self.temporal_patch_size
+        grid_h, grid_w = resized_height // patch_size, resized_width // patch_size
+        patches = patches.reshape(
+            grid_t,
+            temporal_patch_size,
+            channel,
+            grid_h // merge_size,
+            merge_size,
+            patch_size,
+            grid_w // merge_size,
+            merge_size,
+            patch_size,
+        )
+        patches = patches.permute(0, 3, 6, 4, 7, 2, 1, 5, 8)
+        flatten_patches = patches.reshape(
+            grid_t * grid_h * grid_w,
+            channel * temporal_patch_size * patch_size * patch_size,
+        )
+        return flatten_patches, (grid_t, grid_h, grid_w)
 
     def _preprocess(
         self,
@@ -359,6 +459,7 @@ class BailingMM2ImageProcessor(BaseImageProcessor):
         data_format: Optional[ChannelDimension] = ChannelDimension.FIRST,
         input_data_format: Optional[Union[str, ChannelDimension]] = None,
         videos_timestamps_seconds=None,
+        device="cpu",
     ):
         """
         Args:
@@ -501,11 +602,11 @@ class BailingMM2ImageProcessor(BaseImageProcessor):
 
         # kept for BC only and should be removed after v5.0
         if videos is not None:
-            videos = make_batched_videos(videos)
+            videos = make_batched_videos_torch(videos, device=device)
             pixel_values_videos, vision_grid_thws_videos = [], []
             video_timestamps_seconds = []
             for video_idx, images in enumerate(videos):
-                patches, video_grid_thw = self._preprocess(
+                patches, video_grid_thw = self._preprocess_torch(
                     images,
                     do_resize=do_resize,
                     size=size,
@@ -522,7 +623,7 @@ class BailingMM2ImageProcessor(BaseImageProcessor):
                     do_convert_rgb=do_convert_rgb,
                     input_data_format=input_data_format,
                 )
-                pixel_values_videos.extend(patches)
+                pixel_values_videos.append(patches)
                 vision_grid_thws_videos.append(video_grid_thw)
 
                 if videos_timestamps_seconds is not None:
@@ -543,10 +644,12 @@ class BailingMM2ImageProcessor(BaseImageProcessor):
                     ]
                     assert len(aligned_timestamps_seconds) == video_grid_thw[0]
                     video_timestamps_seconds.append(aligned_timestamps_seconds)
-
+            pixel_values_videos = torch.cat(pixel_values_videos, dim=0)
+            if device == "cpu":
+                pixel_values_videos = pixel_values_videos.cpu().numpy()
             data.update(
                 {
-                    "pixel_values_videos": np.array(pixel_values_videos),
+                    "pixel_values_videos": pixel_values_videos,
                     "video_grid_thw": np.array(vision_grid_thws_videos),
                 }
             )

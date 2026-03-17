@@ -233,6 +233,275 @@ print(output_text)
 ```
 
 
+## Ming SDK
+
+Ming SDK provides a simple and easy-to-use Python API for quickly integrating the multimodal capabilities of Ming-flash-omni 2.0.
+
+### SDK Features
+
+- **Unified API Interface**: Supports text generation, speech synthesis, image generation/editing, and more
+- **Streaming Output Support**: Supports streaming generation for text and speech, suitable for real-time interaction scenarios
+- **Flexible Device Configuration**: Supports multi-GPU deployment and memory optimization
+- **Complete Usage Statistics**: Provides detailed statistics on token usage, audio duration, etc.
+
+### SDK Installation
+
+#### Install VLLM
+pip install vllm-0.8.5.post3.dev90+gffc0d5a3f.ant-cp310-cp310-linux_x86_64.whl
+
+#### Install Ming SDK
+#### Option 1: Build from Source
+
+```bash
+# 1. Clone the repository
+git clone https://github.com/inclusionAI/Ming.git
+cd Ming
+
+# 2. Install dependencies
+pip install -r requirements.txt
+
+python ming_sdk/setup.py bdist_wheel
+
+pip3 install dist/ming_sdk-1.0.0-py3-none-any.whl
+```
+
+### SDK Usage Examples
+
+#### Initialize SDK
+
+```python
+from ming_sdk import Ming
+
+# Configuration parameters
+model_path = "your model path"  # Model path
+device = "0,1,2,3"  # GPU devices, supports multi-GPU parallelism
+gpu_memory_utilization = {"moe": 0.8, "talker": 0.17}  # GPU memory utilization
+device_map = {"talker": ["cuda:0"]}  # Module device mapping
+
+# Initialize Ming instance
+ming = Ming(
+    model_path=model_path,
+    device=device,
+    gpu_memory_utilization=gpu_memory_utilization,
+    device_map=device_map,
+    speaker="DB30",  # TTS speaker ID
+    with_async = True,
+    use_talker = True
+)
+```
+
+#### Text Generation
+
+```python
+# Non-streaming text generation
+text, usage = ming.generate(text="介绍一下杭州")
+print(f"text:{text}")
+print(f"usage:{usage}")
+assert text is not None
+
+
+# Streaming text generation
+all_text = ""
+request_id = ""
+for text, request_id, usage in ming.generate_stream(
+    text="介绍一下杭州", max_new_tokens=128
+):
+    all_text += text
+print(f"request_id:{request_id},text={all_text},usage={usage}")
+assert text is not None
+print(f"\nFull text: {all_text}")
+```
+#### Speech QA
+```python
+# Speech QA
+output_audio_path = "test.wav"
+waveform, gen_text, usage = ming.generate(
+    text="介绍一下杭州", output_type="speech", max_new_tokens=128
+)
+sr = 44100
+torchaudio.save(output_audio_path, waveform, sr)
+assert os.path.exists(output_audio_path)
+print(f"request_id:{gen_text},usage={usage}")
+
+
+# Streaming speech QA
+all_wavs = []
+all_text = ""
+request_id = ""
+output_audio_path = "test_stream.wav"
+for data_type, data_content in ming.generate_stream(
+    text="介绍一下杭州", output_type="speech", max_new_tokens=128
+):
+    if data_type == "text_data":
+        text, usage = data_content
+    elif data_type == "text_audio_data":
+        tts_speech, text, meta_info, session_id, usage  = data_content
+        all_text += text
+        all_wavs.append(tts_speech)
+waveform = torch.cat(all_wavs, dim=-1)
+sr = 44100
+torchaudio.save(output_audio_path, waveform, sr)
+print(
+    f"request_id:{request_id},audio:{output_audio_path},text={all_text},usage={usage}"
+)
+assert os.path.exists(output_audio_path)
+
+
+# Streaming speech QA with interruption
+all_wavs = []
+all_text = ""
+request_id = ""
+output_audio_path = "test_stream.wav"
+for data_type, data_content in ming.generate_stream(
+    text="介绍一下杭州", output_type="speech", max_new_tokens=128
+):
+    if data_type == "text_data":
+        text, usage = data_content
+    elif data_type == "text_audio_data":
+        tts_speech, text, meta_info, session_id, usage  = data_content
+        all_text += text
+        all_wavs.append(tts_speech)
+    if len(all_text) > 20:
+        ming.generate_interrupt(request_id)
+waveform = torch.cat(all_wavs, dim=-1)
+sr = 44100
+torchaudio.save(output_audio_path, waveform, sr)
+print(f"request_id:{request_id},audio:{output_audio_path},text={all_text}")
+assert os.path.exists(output_audio_path)
+
+```
+
+#### ASR Task
+```python
+# ASR
+asr_result, usage = ming.generate(
+    text="Please recognize the language of this speech and transcribe it. Format: oral.",
+    audio="https://example.com/audio.wav",
+)
+print(f"asr_result:{asr_result},usage={usage}")
+assert asr_result is not None
+```
+
+#### Text-to-Speech (TTS)
+
+```python
+import torchaudio
+
+# Non-streaming TTS
+waveform, usage = ming.generate(
+    text="我爱北京故宫",
+    output_type="speech"
+)
+torchaudio.save("output_tts.wav", waveform, 44100)
+
+# Streaming TTS
+all_wavs = []
+all_text = ""
+for data_type, data_content in ming.generate_stream(
+    text="我爱北京故宫",
+    output_type="speech"
+):
+    if data_type == "text_audio_data":
+        tts_speech, sentence, meta_info, session_id, usage = data_content
+        all_text += sentence
+        all_wavs.append(tts_speech)
+
+# Save audio
+waveform = torch.cat(all_wavs, dim=-1)
+torchaudio.save("output_tts_stream.wav", waveform, 44100)
+```
+
+#### Speech-to-Speech
+
+```python
+# Non-streaming speech-to-speech
+waveform, gen_text, usage = ming.generate(
+    audio="https://example.com/audio.wav",
+    output_type="speech",
+    max_new_tokens=128
+)
+torchaudio.save("output_speech.wav", waveform, 44100)
+
+# Streaming speech-to-speech
+all_wavs = []
+all_text = ""
+for data_type, data_content in ming.generate_stream(
+    audio="https://example.com/audio.wav",
+    output_type="speech",
+    max_new_tokens=128
+):
+    if data_type == "text_data":
+        text, usage = data_content
+    elif data_type == "text_audio_data":
+        tts_speech, text, meta_info, session_id, usage = data_content
+        all_text += text
+        all_wavs.append(tts_speech)
+
+waveform = torch.cat(all_wavs, dim=-1)
+torchaudio.save("output_speech_stream.wav", waveform, 16000)
+```
+
+
+#### Video Understanding
+
+```python
+# Video QA
+text, usage = ming.generate(
+    text="详细描述一下这段视频",
+    video="test.mp4",
+    output_type="text"
+)
+print(f"Video description: {text}")
+```
+
+#### Request Interruption
+
+```python
+# You can interrupt the request during streaming generation
+msg_request_id = "your-request-id"
+for data_type, data_content in ming.generate_stream(
+    text="介绍一下杭州",
+    output_type="speech",
+    msg_request_id=msg_request_id
+):
+    # Interrupt when condition is met
+    if some_condition:
+        ming.generate_interrupt(msg_request_id)
+        break
+```
+
+### Parameter Reference
+
+#### Ming Initialization Parameters
+
+| Parameter | Type | Default | Description |
+|------|------|--------|------|
+| `model_path` | str | Required | Model weights path, must contain config.json and am.mvn |
+| `sys_prompt` | str | "" | System prompt, prepended to all conversations |
+| `device` | str | "0" | GPU device IDs, comma-separated for multi-GPU, e.g., "0,1,2,3" |
+| `gpu_memory_utilization` | dict | {"moe": 0.6, "talker": 0.1} | GPU memory utilization for each module |
+| `device_map` | dict | {"talker": ["cuda:0"], "image": "cuda:0"} | Mapping from modules to GPUs |
+| `speaker` | str | "DB30" | TTS speaker ID |
+| `quantization` | str \| None | None | Quantization configuration |
+| `use_talker` | bool | True | Whether to load TTS module |
+
+#### generate Method Parameters
+
+| Parameter | Type | Default | Description |
+|------|------|--------|------|
+| `text` | str \| None | None | Input text |
+| `audio` | str \| bytes \| List | None | Audio input (file path/binary/list) |
+| `video` | str \| bytes \| List | None | Video input (file path/binary/list) |
+| `image` | str \| bytes \| List | None | Image input (file path/binary/PIL Image/list) |
+| `history` | list | [] | Conversation history |
+| `output_type` | str | "text" | Output type: text/speech/image/tts |
+| `max_new_tokens` | int | 512 | Maximum number of tokens to generate |
+
+### Complete Examples
+
+For more complete examples, please refer to [ming_sdk/ming_test.py](ming_sdk/ming_test.py).
+
+
 ## Citation
 
 If you find our work helpful, feel free to give us a cite.

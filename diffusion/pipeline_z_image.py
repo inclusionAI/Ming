@@ -12,8 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Portions of the implementations are adapted from https://github.com/Tongyi-MAI/Z-Image/blob/main/src/zimage/pipeline.py. 
-# Based on this code, we made modifications and extensions, including adding Image-Editing，Classifier-free guidance functionality, to better support training for Ming-Omni image generation. 
+# Portions of the implementations are adapted from https://github.com/Tongyi-MAI/Z-Image/blob/main/src/zimage/pipeline.py.
+# Based on this code, we made modifications and extensions, including adding Image-Editing，Classifier-free guidance functionality, to better support training for Ming-Omni image generation.
 # All rights and credit for the original implementation remain with the original authors and contributors, and this project complies with the applicable open-source license terms of the referenced repository.
 
 import inspect
@@ -185,6 +185,7 @@ class ZImagePipeline(DiffusionPipeline, ZImageLoraLoaderMixin, FromSingleFileMix
             2 ** (len(self.vae.config.block_out_channels) - 1) if hasattr(self, "vae") and self.vae is not None else 8
         )
         self.image_processor = VaeImageProcessor(vae_scale_factor=self.vae_scale_factor * 2)
+        self.taylor_cache = False
 
     def encode_prompt(
         self,
@@ -554,22 +555,31 @@ class ZImagePipeline(DiffusionPipeline, ZImageLoraLoaderMixin, FromSingleFileMix
                     prompt_embeds_model_input = prompt_embeds + negative_prompt_embeds
                     timestep_model_input = timestep.repeat(2)
                     ref_hidden_states_input = ref_hidden_states.repeat(2, 1, 1, 1) if ref_hidden_states is not None else None
+                    if ref_hidden_states_input is not None:
+                        ref_hidden_states_input = ref_hidden_states_input.to(latent_model_input.dtype)
                 else:
                     latent_model_input = latents.to(self.transformer.dtype)
                     prompt_embeds_model_input = prompt_embeds
                     timestep_model_input = timestep
                     ref_hidden_states_input = ref_hidden_states*1.0 if ref_hidden_states is not None else None
+                    if ref_hidden_states_input is not None:
+                        ref_hidden_states_input = ref_hidden_states_input.to(latent_model_input.dtype)
 
                 latent_model_input = latent_model_input.unsqueeze(2)
                 latent_model_input_list = list(latent_model_input.unbind(dim=0))
-                
+
                 if ref_hidden_states_input is not None:
                     ref_hidden_states_input = ref_hidden_states_input.unsqueeze(2)
                     ref_hidden_states_input = list(ref_hidden_states_input.unbind(dim=0))
 
-                model_out_list = self.transformer(
-                    latent_model_input_list, timestep_model_input, prompt_embeds_model_input, ref_hidden_states=ref_hidden_states_input, return_dict=False
-                )[0]
+                if self.taylor_cache:
+                    model_out_list = self.transformer(
+                        latent_model_input_list, timestep_model_input, prompt_embeds_model_input, ref_hidden_states=ref_hidden_states_input, return_dict=False, step=i,
+                    )[0]
+                else:
+                    model_out_list = self.transformer(
+                        latent_model_input_list, timestep_model_input, prompt_embeds_model_input, ref_hidden_states=ref_hidden_states_input, return_dict=False
+                    )[0]
 
                 if apply_cfg:
                     # Perform CFG
@@ -635,3 +645,6 @@ class ZImagePipeline(DiffusionPipeline, ZImageLoraLoaderMixin, FromSingleFileMix
             return (image,)
 
         return ZImagePipelineOutput(images=image)
+
+    def set_taylor_cache(self):
+        self.taylor_cache = True

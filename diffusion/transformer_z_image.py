@@ -12,8 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Portions of the implementations are adapted from https://github.com/Tongyi-MAI/Z-Image/blob/main/src/zimage/transformer.py. 
-# Based on this code, we made modifications and extensions, including adding Image-Editing functionality, to better support training for Ming-Omni image generation. 
+# Portions of the implementations are adapted from https://github.com/Tongyi-MAI/Z-Image/blob/main/src/zimage/transformer.py.
+# Based on this code, we made modifications and extensions, including adding Image-Editing functionality, to better support training for Ming-Omni image generation.
 # All rights and credit for the original implementation remain with the original authors and contributors, and this project complies with the applicable open-source license terms of the referenced repository.
 
 import math
@@ -550,6 +550,7 @@ class ZImageTransformer2DModel(ModelMixin, ConfigMixin, PeftAdapterMixin, FromOr
         f_patch_size=1,
         ref_x=None,
         return_dict: bool = True,
+        step=None,
     ):
         assert patch_size in self.all_patch_size
         assert f_patch_size in self.all_f_patch_size
@@ -645,14 +646,60 @@ class ZImageTransformer2DModel(ModelMixin, ConfigMixin, PeftAdapterMixin, FromOr
         for i, seq_len in enumerate(unified_item_seqlens):
             unified_attn_mask[i, :seq_len] = 1
 
-        if torch.is_grad_enabled() and self.gradient_checkpointing:
-            for layer in self.layers:
-                unified = self._gradient_checkpointing_func(
-                    layer, unified, unified_attn_mask, unified_freqs_cis, adaln_input
-                )
+
+        if step is not None:
+            if step == 0:
+                self.saved_steps = []
+                self.saved_features = []
+
+            #[0, 1, 2, 3, 4, 5, 7, 9, 11, 14, 17, 20, 22, 24, 26, 27, 28, 29]:
+            if step in [0, 1, 2, 3, 4, 5, 7, 9, 12, 15, 18, 21, 23, 25, 26, 27, 28, 29]:
+                for layer in self.layers:
+                    unified = layer(unified, unified_attn_mask, unified_freqs_cis, adaln_input)
+
+                self.saved_steps.append(step)
+                self.saved_features.append(unified)
+            else:
+                assert len(self.saved_features) >= 3
+                assert len(self.saved_steps) >= 3
+                # 1. 提取最近三个点的数据
+                f1, f2, f3 = self.saved_features[-1], self.saved_features[-2], self.saved_features[-3]
+                t1, t2, t3 = self.saved_steps[-1], self.saved_steps[-2], self.saved_steps[-3]
+
+                # 2. 计算步长
+                dt1 = t1 - t2
+                dt2 = t2 - t3
+                dt_next = 1.0  # 或者是你想要预测的未来跨度
+
+                # 3. 计算一阶导数 (速度)
+                v1 = (f1 - f2) / dt1
+                v2 = (f2 - f3) / dt2
+
+                # 4. 计算二阶导数 (加速度)
+                # 注意：这里分母是时间中心点的差值
+                a = (v1 - v2) / ((t1 - t3) / 2)
+
+                # 5. 二阶泰勒展开预测
+                unified = f1 + v1 * dt_next + 0.5 * a * (dt_next ** 2)
+
         else:
+            # if torch.is_grad_enabled() and self.gradient_checkpointing:
+            #     for layer in self.layers:
+            #         unified = self._gradient_checkpointing_func(
+            #             layer, unified, unified_attn_mask, unified_freqs_cis, adaln_input
+            #         )
+            # else:
             for layer in self.layers:
                 unified = layer(unified, unified_attn_mask, unified_freqs_cis, adaln_input)
+
+        # if torch.is_grad_enabled() and self.gradient_checkpointing:
+        #     for layer in self.layers:
+        #         unified = self._gradient_checkpointing_func(
+        #             layer, unified, unified_attn_mask, unified_freqs_cis, adaln_input
+        #         )
+        # else:
+        #     for layer in self.layers:
+        #         unified = layer(unified, unified_attn_mask, unified_freqs_cis, adaln_input)
 
         unified = self.all_final_layer[f"{patch_size}-{f_patch_size}"](unified, adaln_input)
         unified = list(unified.unbind(dim=0))

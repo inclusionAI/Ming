@@ -4,7 +4,7 @@
     <img src="https://mdn.alipayobjects.com/huamei_drbxn1/afts/img/YLAgT5MSnLwAAAAAQXAAAAgADkliAQFr/original" width="100"/>
 <p>
 
-<p align="center">📑 <a href="https://arxiv.org/abs/2506.09344">Technical Report</a>｜🤗 <a href="https://huggingface.co/inclusionAI/Ming-flash-omni-2.0">Hugging Face</a>｜ 🤖 <a href="https://www.modelscope.cn/models/inclusionAI/Ming-flash-omni-2.0">ModelScope</a>
+<p align="center">📑 <a href="https://arxiv.org/abs/2506.09344">Technical Report</a>｜🤗 <a href="https://huggingface.co/inclusionAI/Ming-flash-omni-2.0">Hugging Face</a>｜ 🤖 <a href="https://www.modelscope.cn/models/inclusionAI/Ming-flash-omni-2.0">ModelScope</a>｜☁️ <a href="https://cloud.swmgpu.com/w/samofvaani/ming-tts-voice-studio">swm cloud (Ming 3.0 TTS)</a> · <a href="https://cloud.swmgpu.com/w/samofvaani/ming-design-layers">swm cloud (Ming-Image 0.1)</a>
 
 
 
